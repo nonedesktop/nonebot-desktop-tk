@@ -1,3 +1,4 @@
+from glob import glob
 import os
 from pathlib import Path
 import shlex
@@ -5,6 +6,7 @@ from shutil import which
 import subprocess
 import sys
 from tempfile import mkstemp
+from typing import Union
 from venv import create as create_venv
 from nb_cli.consts import WINDOWS
 from nb_cli.handlers.project import create_project
@@ -24,17 +26,26 @@ LINUX_TERMINALS = ("gnome-terminal", "konsole", "xfce4-terminal", "xterm", "st")
 
 def get_terminal_starter():
     if WINDOWS:
-        return ("start", "cmd.exe", "-K")
+        return ("start", "cmd.exe", "/c")
     for te in LINUX_TERMINALS:
         if which(te) is not None:
             return (te, "-e")
     raise FileNotFoundError("no terminal emulator found")
 
 
+def get_terminal_starter_pure():
+    if WINDOWS:
+        return ("start", "cmd.exe")
+    for te in LINUX_TERMINALS:
+        if which(te) is not None:
+            return (te,)
+    raise FileNotFoundError("no terminal emulator found")
+
+
 def get_pause_cmd():
     if WINDOWS:
         return "pause"
-    return "read -p 进程已结束，按任意键关闭。"
+    return "read -n1 -p 进程已结束，按任意键关闭。"
 
 
 def create(fp: str, drivers: list, adapters: list, dev: bool, usevenv: bool):
@@ -93,3 +104,15 @@ def gen_run_script(cwd: Path, cmd: str):
 def exec_new_win(cwd: Path, cmd: str):
     sname = gen_run_script(cwd, cmd)
     return subprocess.Popen(shlex.join((*get_terminal_starter(), sname)), shell=True), sname
+
+
+def open_new_win(cwd: Path):
+    subprocess.Popen(shlex.join(get_terminal_starter_pure()), shell=True, cwd=cwd)
+
+
+def system_open(fp: Union[str, Path]):
+    subprocess.Popen(shlex.join(("start" if WINDOWS else "xdg-open", str(fp))), shell=True)
+
+
+def find_env_file(fp: Union[str, Path]):
+    return glob(".env*", root_dir=fp)

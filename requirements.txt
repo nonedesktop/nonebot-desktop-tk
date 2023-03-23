@@ -1,2 +1,3 @@
 tkreform>=0.2.2
 nb-cli>=1.0.0
+python-dotenv>=1.0.0

@@ -1,18 +1,21 @@
-from locale import getpreferredencoding
 import os
 from pathlib import Path
 from subprocess import Popen
 import sys
 from threading import Thread
+import time
 import tkinter as tk
 from tkinter import BooleanVar, filedialog, messagebox, StringVar
+from tkinter import ttk
 from typing import Optional
 from nonebot_desktop import res, exops
 from tkreform import Packer, Window
 from tkreform.declarative import M, W, Gridder, MenuBinder
 from tkreform.menu import MenuCascade, MenuCommand, MenuSeparator
+from dotenv.main import DotEnv
 
 font10 = ("Microsoft Yahei UI", 10)
+mono10 = ("Consolas", 10)
 
 win = Window(tk.Tk())
 
@@ -57,7 +60,7 @@ def create_project():
                 W(tk.Checkbutton, text=f"{dr.name} ({dr.desc})", variable=dv, font=font10) * Packer(side="top", anchor="w")
                 for dr, dv in zip(res.drivers, drivervars)
             ),
-            W(tk.LabelFrame, text="适配器") * Gridder(column=0, sticky="w") / (
+            W(tk.LabelFrame, text="适配器", font=font10) * Gridder(column=0, sticky="w") / (
                 W(tk.Checkbutton, text=f"{ad.name} ({ad.desc})", variable=av, font=font10) * Packer(side="top", anchor="w")
                 for ad, av in zip(res.adapters, adaptervars)
             ),
@@ -99,6 +102,8 @@ def open_project():
 
 
 def start():
+    if win[1][1].disabled:
+        return
     global curproc
     pdir = Path(cwd.get())
     win[1][0][1].disabled = True
@@ -116,18 +121,83 @@ def start():
     Thread(target=_restore).start()
 
 
+def internal_env_edit():
+    if win[1][1].disabled:
+        return
+    subw = win.sub_window()
+    subw.title = "NoneBot Desktop - 配置文件编辑器"
+
+    allenvs = exops.find_env_file(cwd.get())
+    envf = StringVar(value="")
+    curenv = DotEnv("[请选择一个配置文件进行编辑]")
+    curopts = []
+
+    def envf_updator(varname: str, _unknown: str, op: str):
+        invalid = envf.get() not in allenvs
+        subw[2][0].disabled = invalid
+        if not invalid:
+            nonlocal curenv, curopts
+            curenv = DotEnv(Path(cwd.get()) / envf.get())
+            curopts = [(StringVar(value=k), StringVar(value=v)) for k, v in curenv.dict().items() if v is not None]
+            subw[1] /= (
+                W(tk.Frame) * Gridder(column=0, sticky="w") / (
+                    W(tk.Entry, textvariable=k, font=mono10) * Packer(side="left"),
+                    W(tk.Label, text=" = ", font=mono10) * Packer(side="left"),
+                    W(tk.Entry, textvariable=v, font=mono10) * Packer(side="left")
+                ) for k, v in curopts
+            )
+
+    envf.trace_add("write", envf_updator)
+
+    def new_opt():
+        k, v = StringVar(value="参数名"), StringVar(value="值")
+        curopts.append((k, v))
+        _row = subw[1].add_widget(tk.Frame)
+        _row.grid(column=0, sticky="w")
+        _key = _row.add_widget(tk.Entry, textvariable=k, font=mono10)
+        _lbl = _row.add_widget(tk.Label, text=" = ", font=mono10)
+        _val = _row.add_widget(tk.Entry, textvariable=v, font=mono10)
+        _key.pack(side="left")
+        _lbl.pack(side="left")
+        _val.pack(side="left")
+
+    def save_env():
+        with open(Path(cwd.get()) / envf.get(), "w") as f:
+            f.writelines(f"{k}={v}\n" for k, v in ((_k.get(), _v.get()) for _k, _v in curopts) if k and v)
+
+        def _success():
+            subw[2][1].text = "已保存"
+            time.sleep(3)
+            subw[2][1].text = "保存"
+
+        envf_updator("", "", "")
+        Thread(target=_success).start()
+
+    subw /= (
+        W(tk.LabelFrame, text="可用配置文件", font=font10) * Gridder(column=0, sticky="w") / (
+            W(ttk.Combobox, font=font10, textvariable=envf, value=allenvs) * Packer(expand=True),
+        ),
+        W(tk.LabelFrame, text="配置项", font=font10) * Gridder(column=0, sticky="w"),
+        W(tk.Frame) * Gridder(column=0, sticky="e") / (
+            W(tk.Button, text="新建配置项", font=font10, command=new_opt) * Packer(side="left"),
+            W(tk.Button, text="保存", font=font10, command=save_env) * Packer(side="right"),
+        )
+    )
+
+
 win /= (
     W(tk.Menu) * MenuBinder(win) / (
         M(MenuCascade(label="项目", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="新建项目", font=font10, command=create_project, accelerator="Ctrl+N"),
-            MenuCommand(label="打开项目", font=font10, command=open_project, accelerator="Ctrl+O"),
-            MenuCommand(label="启动项目", font=font10, command=start, accelerator="F5"),
+            MenuCommand(label="新建项目", font=font10, command=create_project),
+            MenuCommand(label="打开项目", font=font10, command=open_project),
+            MenuCommand(label="启动项目", font=font10, command=start),
+            MenuSeparator(),
+            MenuCommand(label="打开项目文件夹", font=font10, command=lambda: exops.system_open(cwd.get())),
             MenuSeparator(),
             MenuCommand(label="退出", font=font10, command=win.destroy, accelerator="Alt+F4")
         ),
         M(MenuCascade(label="配置", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="内置配置文件编辑器", font=font10),
-            MenuCommand(label="使用外部应用程序编辑配置文件", font=font10),
+            MenuCommand(label="配置文件编辑器", command=internal_env_edit, font=font10),
             MenuSeparator(),
             MenuCommand(label="管理驱动器", font=font10),
             MenuSeparator(),
@@ -136,17 +206,18 @@ win /= (
             MenuCommand(label="管理虚拟环境", font=font10)
         ),
         M(MenuCascade(label="插件", font=font10), tearoff=False) * MenuBinder() / (
+            MenuCommand(label="管理内置插件", font=font10),
             MenuCommand(label="插件商店", font=font10),
         ),
         M(MenuCascade(label="高级", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="打开命令行窗口", font=font10),
+            MenuCommand(label="打开命令行窗口", font=font10, command=lambda: exops.open_new_win(Path(cwd.get()))),
             MenuSeparator(),
             MenuCommand(label="创建插件", font=font10),
             MenuSeparator(),
             MenuCommand(label="释放 bot.py", font=font10),
-            MenuCommand(label="编辑 bot.py", font=font10),
+            MenuCommand(label="编辑 bot.py", font=font10, command=lambda: exops.system_open(Path(cwd.get()) / "bot.py")),
             MenuSeparator(),
-            MenuCommand(label="编辑 pyproject.toml", font=font10)
+            MenuCommand(label="编辑 pyproject.toml", font=font10, command=lambda: exops.system_open(Path(cwd.get()) / "pyproject.toml"))
         ),
         M(MenuCascade(label="帮助", font=font10), tearoff=False) * MenuBinder() / (
             MenuCommand(label="使用手册", font=font10),
