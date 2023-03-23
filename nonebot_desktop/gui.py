@@ -1,7 +1,12 @@
+from locale import getpreferredencoding
+import os
 from pathlib import Path
+from subprocess import Popen
+import sys
 from threading import Thread
 import tkinter as tk
-from tkinter import BooleanVar, filedialog, StringVar
+from tkinter import BooleanVar, filedialog, messagebox, StringVar
+from typing import Optional
 from nonebot_desktop import res, exops
 from tkreform import Packer, Window
 from tkreform.declarative import M, W, Gridder, MenuBinder
@@ -16,6 +21,7 @@ win.size = 456, 80
 win.resizable = False
 
 cwd = StringVar(value="[点击“项目”菜单新建或打开项目]")
+curproc: Optional[Popen[bytes]] = None
 
 
 def cwd_updator(varname: str, _unknown: str, op: str):
@@ -82,8 +88,9 @@ def create_project():
         )
         cwd.set(mkwd.get())
         subw.destroy()
+        messagebox.showinfo(title="项目创建完成", message="项目创建成功，已自动进入该项目。", master=win.base)
 
-    cth = Thread(target=create, daemon=True)
+    cth = Thread(target=create)
     subw[0][5].callback(cth.start)
 
 
@@ -91,12 +98,30 @@ def open_project():
     cwd.set(filedialog.askdirectory(mustexist=True, parent=win.base, title="选择项目目录"))
 
 
+def start():
+    global curproc
+    pdir = Path(cwd.get())
+    win[1][0][1].disabled = True
+    win[1][1].disabled = True
+    curproc, tmp = exops.exec_new_win(pdir, f'''"{sys.executable}" -m nb_cli run''')
+
+    def _restore():
+        if curproc:
+            while curproc.poll() is None:
+                pass
+            win[1][0][1].disabled = False
+            win[1][1].disabled = False
+            os.remove(tmp)
+
+    Thread(target=_restore).start()
+
+
 win /= (
     W(tk.Menu) * MenuBinder(win) / (
         M(MenuCascade(label="项目", font=font10), tearoff=False) * MenuBinder() / (
             MenuCommand(label="新建项目", font=font10, command=create_project, accelerator="Ctrl+N"),
             MenuCommand(label="打开项目", font=font10, command=open_project, accelerator="Ctrl+O"),
-            MenuCommand(label="启动项目", font=font10, accelerator="F5"),
+            MenuCommand(label="启动项目", font=font10, command=start, accelerator="F5"),
             MenuSeparator(),
             MenuCommand(label="退出", font=font10, command=win.destroy, accelerator="Alt+F4")
         ),
@@ -133,7 +158,7 @@ win /= (
             W(tk.Label, text="当前路径：", font=("Microsoft Yahei UI", 12)) * Packer(side="left"),
             W(tk.Entry, textvariable=cwd, font=("Microsoft Yahei UI", 12), width=40) * Packer(side="left", expand=True)
         ),
-        W(tk.Button, text="启动", font=("Microsoft Yahei UI", 20)) * Gridder(row=1, sticky="w")
+        W(tk.Button, text="启动", command=start, font=("Microsoft Yahei UI", 20)) * Gridder(row=1, sticky="w")
     )
 )
 
