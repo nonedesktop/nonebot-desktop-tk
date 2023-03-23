@@ -10,6 +10,14 @@ from typing import Union
 from venv import create as create_venv
 from nb_cli.consts import WINDOWS
 from nb_cli.handlers.project import create_project
+from importlib import metadata
+
+
+current_distros = metadata.distributions
+
+
+def distributions(*fp: str):
+    return metadata.distributions(path=list(fp))
 
 
 def find_python(fp: Path):
