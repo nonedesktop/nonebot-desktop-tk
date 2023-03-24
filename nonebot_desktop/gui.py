@@ -1,7 +1,6 @@
 from glob import glob
 import os
 from pathlib import Path
-from pprint import pprint
 from subprocess import Popen
 import sys
 from threading import Thread
@@ -9,7 +8,7 @@ import time
 import tkinter as tk
 from tkinter import BooleanVar, Event, filedialog, messagebox, StringVar
 from tkinter import ttk
-from typing import Iterable, Optional
+from typing import Optional
 from nonebot_desktop import res, exops
 from tkreform import Packer, Window
 from tkreform.declarative import M, W, Gridder, MenuBinder
@@ -23,7 +22,7 @@ mono10 = ("Consolas", 10)
 win = Window(tk.Tk())
 
 win.title = "NoneBot Desktop"
-win.size = 456, 80
+win.size = 452, 80
 win.resizable = False
 
 cwd = StringVar(value="[点击“项目”菜单新建或打开项目]")
@@ -116,42 +115,88 @@ def enviroman():
     subw.size = 720, 460
 
     curdist = ""
+    _dist_index = {}
+    dists = StringVar()
+    tmpindex = StringVar()
 
-    _dists = list(exops.distributions(*(str(Path(cwd.get()) / si) for si in glob(".venv/**/site-packages", root_dir=cwd.get(), recursive=True))))
-    if not _dists:
-        _dists = list(exops.current_distros())
+    def update_dists_list():
+        _dists = list(exops.distributions(*(str(Path(cwd.get()) / si) for si in glob(".venv/**/site-packages", root_dir=cwd.get(), recursive=True))))
+        if not _dists:
+            _dists = list(exops.current_distros())
 
-    _dist_index = {d.name: d for d in _dists}
+        _dist_index.clear()
+        _dist_index.update({d.name: d for d in _dists})
 
-    dists = StringVar(value=[x for x in _dist_index])  # type: ignore
+        dists.set([x for x in _dist_index])  # type: ignore
+
+    update_dists_list()
+
+    def pkgop(op: str):
+        cfp = Path(cwd.get())
+        subw[0][0][0].disabled = True
+        subw[0][1][2][0].disabled = True
+        subw[0][1][1][0].disabled = True
+        subw[0][1][1][1].disabled = True
+        p, tmp = exops.exec_new_win(
+            cfp,
+            f'''"{exops.find_python(cfp)}" -m pip {op} "{curdist}"'''
+        )
+
+        def _restore():
+            if p:
+                while p.poll() is None:
+                    pass
+                subw[0][0][0].disabled = False
+                subw[0][1][2][0].disabled = False
+                update_dists_list()
+                _infoupd()
+                os.remove(tmp)
+
+        Thread(target=_restore).start()
 
     subw /= (
         W(tk.PanedWindow, showhandle=True) * Packer(fill="both", expand=True) / (
             W(tk.LabelFrame, text="程序包", font=font10) / (
-                W(tk.Listbox, listvariable=dists, font=font10) * Packer(side="left", fill="both", expand=True),
+                W(tk.Listbox, listvariable=dists, font=mono10) * Packer(side="left", fill="both", expand=True),
                 W(ttk.Scrollbar) * Packer(side="right", fill="y")
             ),
             W(tk.LabelFrame, text="详细信息", font=font10) / (
-                W(tk.Label, text="双击程序包以查看信息", font=font10, justify="left") * Packer(anchor="nw", fill="both", expand=True),
+                W(tk.Message, text="双击程序包以查看信息", font=font10, justify="left", width=400) * Packer(anchor="nw", expand=True),
                 W(tk.Frame) * Packer(side="bottom", fill="x") / (
-                    W(tk.Button, text="更新", font=font10) * Packer(side="left", fill="x", expand=True),
-                    W(tk.Button, text="卸载", font=font10) * Packer(side="right", fill="x", expand=True)
+                    W(tk.Button, text="更新", command=lambda: pkgop("install -U" + (f" -i {tmpindex.get()}" if tmpindex.get() else "")), font=font10, state="disabled") * Packer(side="left", fill="x", expand=True),
+                    W(tk.Button, text="卸载", command=lambda: pkgop("uninstall"), font=font10, state="disabled") * Packer(side="right", fill="x", expand=True)
+                ),
+                W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="bottom", expand=True) / (
+                    W(tk.Entry, textvariable=tmpindex, font=mono10) * Packer(side="left", fill="x", expand=True),
                 )
             )
         ),
     )
 
+    li: tk.Listbox = subw[0][0][0].base  # type: ignore
+    sl: ttk.Scrollbar = subw[0][0][1].base  # type: ignore
+    li.config(yscrollcommand=sl.set)
+    sl.config(command=li.yview)
+
+    def _infoupd():
+        if m := _dist_index.get(curdist, None):
+            dm = m.metadata
+            subw[0][1][0].text = (
+                f"名称：{dm['name']}\n"
+                f"版本：{dm['version']}\n"
+                f"摘要：{dm['summary']}\n"
+            )
+        else:
+            subw[0][1][0].text = "双击程序包以查看信息"
+
+        subw[0][1][1][0].disabled = not m
+        subw[0][1][1][1].disabled = not m
+
     @subw[0][0][0].on(str(LMB - X2))
     def showinfo(event: Event):
         nonlocal curdist
         curdist = event.widget.get(event.widget.curselection())
-        dm = _dist_index[curdist].metadata
-        LF = "\n"
-        subw[0][1][0].text = (
-            f"名称：{dm['name']}\n"
-            f"版本：{dm['version']}\n"
-            f"摘要：{dm['summary']}\n"
-        )
+        _infoupd()
 
 
 def open_project():
