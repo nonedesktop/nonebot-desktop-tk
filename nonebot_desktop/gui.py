@@ -1,3 +1,4 @@
+from functools import partial
 from glob import glob
 import os
 from pathlib import Path
@@ -6,9 +7,9 @@ import sys
 from threading import Thread
 import time
 import tkinter as tk
-from tkinter import BooleanVar, Event, filedialog, messagebox, StringVar
+from tkinter import BooleanVar, Event, TclError, filedialog, messagebox, StringVar
 from tkinter import ttk
-from typing import Optional
+from typing import List, Literal, Optional
 from nonebot_desktop import res, exops
 from tkreform import Packer, Window
 from tkreform.declarative import M, W, Gridder, MenuBinder
@@ -26,10 +27,11 @@ win.size = 452, 80
 win.resizable = False
 
 cwd = StringVar(value="[点击“项目”菜单新建或打开项目]")
+tmpindex = StringVar()
 curproc: Optional[Popen[bytes]] = None
 
 
-def cwd_updator(varname: str, _unknown: str, op: str):
+def cwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
     fp = Path(cwd.get())
     win[1][1].disabled = not fp.is_dir() or not ((fp / "pyproject.toml").is_file() or (fp / "bot.py").is_file())
     m: tk.Menu = win[0].base  # type: ignore
@@ -41,6 +43,10 @@ def cwd_updator(varname: str, _unknown: str, op: str):
 cwd.trace_add("write", cwd_updator)
 
 
+def getdist():
+    return exops.distributions(*(str(Path(cwd.get()) / si) for si in glob(".venv/**/site-packages", root_dir=cwd.get(), recursive=True)))
+
+
 def create_project():
     subw = win.sub_window()
     subw.title = "NoneBot Desktop - 新建项目"
@@ -50,8 +56,8 @@ def create_project():
     adaptervars = [BooleanVar(value=False) for _ in res.adapters]
     devplugvar, venvvar = BooleanVar(value=False), BooleanVar(value=True)
 
-    def mkwd_updator(varname: str, _unknown: str, op: str):
-        subw[0][5].disabled = not mkwd.get()
+    def mkwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
+        subw[0][6].disabled = not mkwd.get()
 
     mkwd.trace_add("write", mkwd_updator)
 
@@ -72,6 +78,9 @@ def create_project():
             ),
             W(tk.Checkbutton, text="预留配置用于开发插件（将会创建 src/plugins）", variable=devplugvar, font=font10) * Gridder(column=0, sticky="w"),
             W(tk.Checkbutton, text="创建虚拟环境（位于 .venv，用于隔离环境）", variable=venvvar, font=font10) * Gridder(column=0, sticky="w"),
+            W(tk.LabelFrame, text="自定义下载源", font=font10) * Gridder(column=0, sticky="w") / (
+                W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10, width=50) * Packer(side="left", fill="x", expand=True),
+            ),
             W(tk.Button, text="创建", font=font10) * Gridder(column=0, sticky="e")
         ),
     )
@@ -82,31 +91,120 @@ def create_project():
 
     # subw[0][1][1].base.select()  # type: ignore
     # subw[0][4].base.select()  # type: ignore
-    subw[0][5].disabled = True
+    subw[0][6].disabled = True
 
     def create():
         # print([x.get() for x in drivervars])
         # print([x.get() for x in adaptervars])
         # print(devplugvar.get(), venvvar.get())
-        subw[0][5].text = "正在创建项目……"
-        subw[0][5].disabled = True
+        subw[0][6].text = "正在创建项目……"
+        subw[0][6].disabled = True
         exops.create(
             mkwd.get(), [d for d, b in zip(res.drivers, drivervars) if b.get()],
             [a for a, b in zip(res.adapters, adaptervars) if b.get()],
-            devplugvar.get(), venvvar.get()
+            devplugvar.get(), venvvar.get(), tmpindex.get()
         )
         cwd.set(mkwd.get())
-        subw.destroy()
+        try:
+            subw.destroy()
+        except TclError:
+            pass
         messagebox.showinfo(title="项目创建完成", message="项目创建成功，已自动进入该项目。", master=win.base)
 
     cth = Thread(target=create)
-    subw[0][5].callback(cth.start)
+    subw[0][6].callback(cth.start)
 
 
 def drvmgr():
-    # drivervars = [BooleanVar(value=False) for d in res.drivers]
-    for d in exops.distributions(*(str(Path(cwd.get()) / si) for si in glob(".venv/**/site-packages", root_dir=cwd.get(), recursive=True))):
-        print(d.metadata.json["name"])
+    driverenvs: List[StringVar] = [StringVar(value="启用") for _ in res.drivers]  # drivers' states (enabled, disabled)
+    drivervars: List[StringVar] = [StringVar(value="安装") for _ in res.drivers]  # drivers' states (installed, not installed)
+
+    def update_drivers():
+        distnames = [d.metadata["name"].lower() for d in getdist()]
+        _enabled = exops.recursive_find_env_config(cwd.get(), "DRIVER")
+        if _enabled is None:
+            enabled = []
+        else:
+            enabled = _enabled.split("+")
+
+        for n, d in enumerate(res.drivers):
+            if d.name.lower() in distnames:
+                drivervars[n].set("已安装")
+            elif d.name != "None":
+                drivervars[n].set("安装")
+            else:
+                drivervars[n].set("内置")
+            
+            driverenvs[n].set("禁用" if d.module_name in enabled else "启用")
+
+    update_drivers()
+
+    subw = win.sub_window()
+    subw.title = "NoneBot Desktop - 管理驱动器"
+    subw.resizable = False
+
+    def getnenabledstate(n: int):
+        return "disabled" if drivervars[n].get() == "安装" else "normal"
+
+    def getninstalledstate(n: int):
+        return "disabled" if drivervars[n].get() == "内置" or drivervars[n].get() == "已安装" else "normal"
+
+    def perform(n: int, op: Literal["enabled", "installed"]):
+        target = res.drivers[n]
+        if op == "enabled":
+            _enabled = exops.recursive_find_env_config(cwd.get(), "DRIVER")
+            if _enabled is None:
+                enabled = []
+            else:
+                enabled = _enabled.split("+")
+
+            if target.module_name in enabled:
+                enabled.remove(target.module_name)
+            else:
+                enabled.append(target.module_name)
+                enabled.sort()
+
+            exops.recursive_update_env_config(cwd.get(), "DRIVER", "+".join(enabled))
+
+            update_drivers()
+            subw[0][n][1][0].base["state"] = getnenabledstate(n)
+            subw[0][n][1][1].base["state"] = getninstalledstate(n)
+        else:
+            cfp = Path(cwd.get())
+            subw[0][n][1][1].disabled = True
+
+            p, tmp = exops.exec_new_win(
+                cfp,
+                f'''"{exops.find_python(cfp)}" -m pip install "{target.project_link}"'''
+            )
+
+            def _restore():
+                if p:
+                    while p.poll() is None:
+                        pass
+                    os.remove(tmp)
+                    update_drivers()
+                    subw[0][n][1][0].base["state"] = getnenabledstate(n)
+                    subw[0][n][1][1].base["state"] = getninstalledstate(n)
+
+            Thread(target=_restore).start()
+
+    subw /= (
+        W(tk.Frame) * Packer(side="top") / (
+            (
+                W(tk.LabelFrame, text=drv.name, font=font10) * Gridder(column=n & 1, row=n // 2, sticky="nw") / (
+                    W(tk.Label, text=drv.desc, font=font10, width=20, height=3, justify="left") * Packer(anchor="nw", side="top"),
+                    W(tk.Frame) * Packer(anchor="nw", fill="x", side="top", expand=True) / (
+                        W(tk.Button, font=font10, textvariable=driverenvs[n], command=partial(perform, n, "enabled"), state=getnenabledstate(n)) * Packer(fill="x", side="left", expand=True),
+                        W(tk.Button, font=font10, textvariable=drivervars[n], command=partial(perform, n, "installed"), state=getninstalledstate(n)) * Packer(fill="x", side="left", expand=True)
+                    )
+                )
+            ) for n, drv in enumerate(res.drivers)
+        ),
+        W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
+            W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
+        )
+    )
 
 
 def enviroman():
@@ -117,10 +215,9 @@ def enviroman():
     curdist = ""
     _dist_index = {}
     dists = StringVar()
-    tmpindex = StringVar()
 
     def update_dists_list():
-        _dists = list(exops.distributions(*(str(Path(cwd.get()) / si) for si in glob(".venv/**/site-packages", root_dir=cwd.get(), recursive=True))))
+        _dists = list(getdist())
         if not _dists:
             _dists = list(exops.current_distros())
 
@@ -146,11 +243,11 @@ def enviroman():
             if p:
                 while p.poll() is None:
                     pass
+                os.remove(tmp)
+                update_dists_list()
                 subw[0][0][0].disabled = False
                 subw[0][1][2][0].disabled = False
-                update_dists_list()
                 _infoupd()
-                os.remove(tmp)
 
         Thread(target=_restore).start()
 
@@ -167,7 +264,7 @@ def enviroman():
                     W(tk.Button, text="卸载", command=lambda: pkgop("uninstall"), font=font10, state="disabled") * Packer(side="right", fill="x", expand=True)
                 ),
                 W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="bottom", expand=True) / (
-                    W(tk.Entry, textvariable=tmpindex, font=mono10) * Packer(side="left", fill="x", expand=True),
+                    W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
                 )
             )
         ),
@@ -240,9 +337,10 @@ def internal_env_edit():
     curenv = DotEnv(envf.get())
     curopts = []
 
-    def envf_updator(varname: str, _unknown: str, op: str):
+    def envf_updator(varname: str = "", _unknown: str = "", op: str = ""):
         invalid = envf.get() not in allenvs
         subw[2][0].disabled = invalid
+        subw[2][1].disabled = invalid
         if not invalid:
             nonlocal curenv, curopts
             curenv = DotEnv(Path(cwd.get()) / envf.get())
@@ -251,7 +349,7 @@ def internal_env_edit():
                 W(tk.Frame) * Gridder(column=0, sticky="w") / (
                     W(tk.Entry, textvariable=k, font=mono10) * Packer(side="left"),
                     W(tk.Label, text=" = ", font=mono10) * Packer(side="left"),
-                    W(tk.Entry, textvariable=v, font=mono10) * Packer(side="left")
+                    W(tk.Entry, textvariable=v, font=mono10, width=40) * Packer(side="left")
                 ) for k, v in curopts
             )
 
@@ -264,7 +362,7 @@ def internal_env_edit():
         _row.grid(column=0, sticky="w")
         _key = _row.add_widget(tk.Entry, textvariable=k, font=mono10)
         _lbl = _row.add_widget(tk.Label, text=" = ", font=mono10)
-        _val = _row.add_widget(tk.Entry, textvariable=v, font=mono10)
+        _val = _row.add_widget(tk.Entry, textvariable=v, font=mono10, width=40)
         _key.pack(side="left")
         _lbl.pack(side="left")
         _val.pack(side="left")
@@ -278,12 +376,13 @@ def internal_env_edit():
             time.sleep(3)
             subw[2][1].text = "保存"
 
-        envf_updator("", "", "")
+        envf_updator()
+
         Thread(target=_success).start()
 
     subw /= (
         W(tk.LabelFrame, text="可用配置文件", font=font10) * Gridder(column=0, sticky="w") / (
-            W(ttk.Combobox, font=font10, textvariable=envf, value=allenvs) * Packer(expand=True),
+            W(ttk.Combobox, font=font10, textvariable=envf, value=allenvs, width=50) * Packer(expand=True),
         ),
         W(tk.LabelFrame, text="配置项", font=font10) * Gridder(column=0, sticky="w"),
         W(tk.Frame) * Gridder(column=0, sticky="e") / (
@@ -291,6 +390,7 @@ def internal_env_edit():
             W(tk.Button, text="保存", font=font10, command=save_env) * Packer(side="right"),
         )
     )
+    envf_updator()
 
 
 win /= (
@@ -340,7 +440,7 @@ win /= (
     )
 )
 
-cwd_updator("", "", "")
+cwd_updator()
 
 
 def start_window():
