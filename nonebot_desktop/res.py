@@ -1,5 +1,6 @@
 import asyncio
-from importlib import import_module
+import importlib.util
+import sys
 from threading import Thread
 from typing import Callable, Generic, ParamSpec, TypeVar
 
@@ -21,16 +22,33 @@ class BackgroundObject(Generic[P, T]):
         self._value = self._func(*args, **kwargs)
 
 
+def lazy_import(name):
+    spec = importlib.util.find_spec(name)
+    if spec is None:
+        raise ImportError(f"cannot import {name}")
+    loader = importlib.util.LazyLoader(spec.loader)  # type: ignore
+    spec.loader = loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    loader.exec_module(module)
+    return module
+
+
 class NBCLI:
     _SINGLETON = None
 
     def __new__(cls):
         if cls._SINGLETON is None:
             cls._SINGLETON = object.__new__(cls)
-            cls.load_module_data = BackgroundObject(import_module, "load_module_data", "nb_cli.handlers.meta")
-            cls.list_builtin_plugins = BackgroundObject(import_module, "list_builtin_plugins", "nb_cli.handlers.plugin")
-            cls.create_project = BackgroundObject(import_module, "create_project", "nb_cli.handlers.project")
+            cls.meta = BackgroundObject(lazy_import, "nb_cli.handlers.meta")
+            cls.plugin = BackgroundObject(lazy_import, "nb_cli.handlers.plugin")
+            cls.project = BackgroundObject(lazy_import, "nb_cli.handlers.project")
         return cls._SINGLETON
+
+
+# meta = lazy_import("nb_cli.handlers.meta")
+# plugin = lazy_import("nb_cli.handlers.plugin")
+# project = lazy_import("nb_cli.handlers.project")
 
 
 PYPI_MIRRORS = [
@@ -51,11 +69,11 @@ class Data:
     def __new__(cls):
         if cls._SINGLETON is None:
             cls._SINGLETON = object.__new__(cls)
-            cls.drivers = BackgroundObject(asyncio.run, NBCLI().load_module_data("driver"))
-            cls.adapters = BackgroundObject(asyncio.run, NBCLI().load_module_data("adapter"))
-            cls.plugins = BackgroundObject(asyncio.run, NBCLI().load_module_data("plugin"))
+            cls.drivers = BackgroundObject(asyncio.run, NBCLI().meta.load_module_data("driver"))
+            cls.adapters = BackgroundObject(asyncio.run, NBCLI().meta.load_module_data("adapter"))
+            cls.plugins = BackgroundObject(asyncio.run, NBCLI().meta.load_module_data("plugin"))
         return cls._SINGLETON
 
 
 def get_builtin_plugins(pypath: str):
-    return asyncio.run(NBCLI().list_builtin_plugins(python_path=pypath))
+    return asyncio.run(NBCLI().plugin.list_builtin_plugins(python_path=pypath))

@@ -62,7 +62,7 @@ def create(fp: str, drivers: list, adapters: list, dev: bool, usevenv: bool, ind
     p = Path(fp)
     if p.exists():
         p.rmdir()
-    NBCLI().create_project(
+    NBCLI().project.create_project(
         "simple" if dev else "bootstrap",
         {
             "nonebot": {
