@@ -8,11 +8,12 @@ import sys
 from tempfile import mkstemp
 from typing import Optional, Union
 from venv import create as create_venv
-from nb_cli.consts import WINDOWS
-from nb_cli.handlers.project import create_project
 from importlib import metadata
 from dotenv.main import DotEnv
 
+from nonebot_desktop.res import NBCLI
+
+WINDOWS = sys.platform.startswith("win") or (sys.platform == "cli" and os.name == "nt")
 
 current_distros = metadata.distributions
 
@@ -61,7 +62,7 @@ def create(fp: str, drivers: list, adapters: list, dev: bool, usevenv: bool, ind
     p = Path(fp)
     if p.exists():
         p.rmdir()
-    create_project(
+    NBCLI().create_project(
         "simple" if dev else "bootstrap",
         {
             "nonebot": {

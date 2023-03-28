@@ -1,7 +1,37 @@
 import asyncio
-from sqlite3 import adapters
-from nb_cli.handlers.meta import load_module_data
-from nb_cli.handlers.plugin import list_builtin_plugins
+from importlib import import_module
+from threading import Thread
+from typing import Callable, Generic, ParamSpec, TypeVar
+
+T = TypeVar("T")
+P = ParamSpec("P")
+
+
+class BackgroundObject(Generic[P, T]):
+    def __init__(self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> None:
+        self._func = func
+        self._thread = Thread(None, self._work, None, args, kwargs)
+        self._thread.start()
+
+    def __get__(self, obj, objtype=None) -> T:
+        self._thread.join()
+        return self._value
+
+    def _work(self, *args: P.args, **kwargs: P.kwargs) -> None:
+        self._value = self._func(*args, **kwargs)
+
+
+class NBCLI:
+    _SINGLETON = None
+
+    def __new__(cls):
+        if cls._SINGLETON is None:
+            cls._SINGLETON = object.__new__(cls)
+            cls.load_module_data = BackgroundObject(import_module, "load_module_data", "nb_cli.handlers.meta")
+            cls.list_builtin_plugins = BackgroundObject(import_module, "list_builtin_plugins", "nb_cli.handlers.plugin")
+            cls.create_project = BackgroundObject(import_module, "create_project", "nb_cli.handlers.project")
+        return cls._SINGLETON
+
 
 PYPI_MIRRORS = [
     "https://pypi.org/simple",
@@ -14,10 +44,18 @@ PYPI_MIRRORS = [
     "https://mirrors.sustech.edu.cn/pypi/simple"
 ]
 
-drivers = asyncio.run(load_module_data("driver"))
-adapters = asyncio.run(load_module_data("adapter"))
-plugins = asyncio.run(load_module_data("plugin"))
+
+class Data:
+    _SINGLETON = None
+
+    def __new__(cls):
+        if cls._SINGLETON is None:
+            cls._SINGLETON = object.__new__(cls)
+            cls.drivers = BackgroundObject(asyncio.run, NBCLI().load_module_data("driver"))
+            cls.adapters = BackgroundObject(asyncio.run, NBCLI().load_module_data("adapter"))
+            cls.plugins = BackgroundObject(asyncio.run, NBCLI().load_module_data("plugin"))
+        return cls._SINGLETON
 
 
 def get_builtin_plugins(pypath: str):
-    return asyncio.run(list_builtin_plugins(python_path=pypath))
+    return asyncio.run(NBCLI().list_builtin_plugins(python_path=pypath))

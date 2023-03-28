@@ -1,3 +1,7 @@
+import time
+
+t0 = time.perf_counter()
+
 from functools import partial
 from glob import glob
 import os
@@ -5,17 +9,27 @@ from pathlib import Path
 from subprocess import Popen
 import sys
 from threading import Thread
-import time
+from typing import List, Literal, Optional
+
+t1 = time.perf_counter()
+
 import tkinter as tk
 from tkinter import BooleanVar, Event, TclError, filedialog, messagebox, StringVar
 from tkinter import ttk
-from typing import List, Literal, Optional
+
+t1_1 = time.perf_counter()
+
 from nonebot_desktop import res, exops
+
+t1_2 = time.perf_counter()
+
 from tkreform import Packer, Window
 from tkreform.declarative import M, W, Gridder, MenuBinder
 from tkreform.menu import MenuCascade, MenuCommand, MenuSeparator
 from tkreform.events import LMB, X2
 from dotenv.main import DotEnv
+
+t2 = time.perf_counter()
 
 font10 = ("Microsoft Yahei UI", 10)
 mono10 = ("Consolas", 10)
@@ -52,8 +66,8 @@ def create_project():
     subw.title = "NoneBot Desktop - 新建项目"
 
     mkwd = StringVar(value="")
-    drivervars = [BooleanVar(value=d.name == "FastAPI") for d in res.drivers]
-    adaptervars = [BooleanVar(value=False) for _ in res.adapters]
+    drivervars = [BooleanVar(value=d.name == "FastAPI") for d in res.Data().drivers]
+    adaptervars = [BooleanVar(value=False) for _ in res.Data().adapters]
     devplugvar, venvvar = BooleanVar(value=False), BooleanVar(value=True)
 
     def mkwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
@@ -70,11 +84,11 @@ def create_project():
             ),
             W(tk.LabelFrame, text="驱动器", font=font10) * Gridder(column=0, sticky="w") / (
                 W(tk.Checkbutton, text=f"{dr.name} ({dr.desc})", variable=dv, font=font10) * Packer(side="top", anchor="w")
-                for dr, dv in zip(res.drivers, drivervars)
+                for dr, dv in zip(res.Data().drivers, drivervars)
             ),
             W(tk.LabelFrame, text="适配器", font=font10) * Gridder(column=0, sticky="w") / (
                 W(tk.Checkbutton, text=f"{ad.name} ({ad.desc})", variable=av, font=font10) * Packer(side="top", anchor="w")
-                for ad, av in zip(res.adapters, adaptervars)
+                for ad, av in zip(res.Data().adapters, adaptervars)
             ),
             W(tk.Checkbutton, text="预留配置用于开发插件（将会创建 src/plugins）", variable=devplugvar, font=font10) * Gridder(column=0, sticky="w"),
             W(tk.Checkbutton, text="创建虚拟环境（位于 .venv，用于隔离环境）", variable=venvvar, font=font10) * Gridder(column=0, sticky="w"),
@@ -100,8 +114,8 @@ def create_project():
         subw[0][6].text = "正在创建项目……"
         subw[0][6].disabled = True
         exops.create(
-            mkwd.get(), [d for d, b in zip(res.drivers, drivervars) if b.get()],
-            [a for a, b in zip(res.adapters, adaptervars) if b.get()],
+            mkwd.get(), [d for d, b in zip(res.Data().drivers, drivervars) if b.get()],
+            [a for a, b in zip(res.Data().adapters, adaptervars) if b.get()],
             devplugvar.get(), venvvar.get(), tmpindex.get()
         )
         cwd.set(mkwd.get())
@@ -116,8 +130,8 @@ def create_project():
 
 
 def drvmgr():
-    driverenvs: List[StringVar] = [StringVar(value="启用") for _ in res.drivers]  # drivers' states (enabled, disabled)
-    drivervars: List[StringVar] = [StringVar(value="安装") for _ in res.drivers]  # drivers' states (installed, not installed)
+    driverenvs: List[StringVar] = [StringVar(value="启用") for _ in res.Data().drivers]  # drivers' states (enabled, disabled)
+    drivervars: List[StringVar] = [StringVar(value="安装") for _ in res.Data().drivers]  # drivers' states (installed, not installed)
 
     def update_drivers():
         distnames = [d.metadata["name"].lower() for d in getdist()]
@@ -127,7 +141,7 @@ def drvmgr():
         else:
             enabled = _enabled.split("+")
 
-        for n, d in enumerate(res.drivers):
+        for n, d in enumerate(res.Data().drivers):
             if d.name.lower() in distnames:
                 drivervars[n].set("已安装")
             elif d.name != "None":
@@ -150,7 +164,7 @@ def drvmgr():
         return "disabled" if drivervars[n].get() == "内置" or drivervars[n].get() == "已安装" else "normal"
 
     def perform(n: int, op: Literal["enabled", "installed"]):
-        target = res.drivers[n]
+        target = res.Data().drivers[n]
         if op == "enabled":
             _enabled = exops.recursive_find_env_config(cwd.get(), "DRIVER")
             if _enabled is None:
@@ -199,7 +213,7 @@ def drvmgr():
                         W(tk.Button, font=font10, textvariable=drivervars[n], command=partial(perform, n, "installed"), state=getninstalledstate(n)) * Packer(fill="x", side="left", expand=True)
                     )
                 )
-            ) for n, drv in enumerate(res.drivers)
+            ) for n, drv in enumerate(res.Data().drivers)
         ),
         W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
             W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
@@ -392,6 +406,7 @@ def internal_env_edit():
     )
     envf_updator()
 
+t3 = time.perf_counter()
 
 win /= (
     W(tk.Menu) * MenuBinder(win) / (
@@ -442,6 +457,14 @@ win /= (
 
 cwd_updator()
 
+t4 = time.perf_counter()
 
 def start_window():
+    print(f"Import base: {t1 - t0}s")
+    print(f"Import tkinter: {t1_1 - t1}s")
+    print(f"Import this module: {t1_2 - t1_1}s")
+    print(f"Import rest modules: {t2 - t1_2}s")
+    print(f"Init Sub Functions: {t3 - t2}s")
+    print(f"Main UI Ready: {t4 - t3}s")
+    print(f"Total: {t4 - t1}s")
     win.loop()
