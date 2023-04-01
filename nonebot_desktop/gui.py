@@ -71,7 +71,21 @@ def create_project():
     devplugvar, venvvar = BooleanVar(value=False), BooleanVar(value=True)
 
     def mkwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
-        subw[0][6].disabled = not mkwd.get()
+        targetpath = Path(mkwd.get())
+        # For valid target:
+        # - target is a path
+        # - target does not exist or is empty dir
+        if not mkwd.get():  # empty path
+            subw[0][6].disabled = True
+            messagebox.showerror("错误", "路径不能为空", master=subw.base)
+        elif targetpath.is_dir() and tuple(targetpath.iterdir()):  # non-empty dir
+            subw[0][6].disabled = True
+            messagebox.showerror("错误", "目标目录不能非空", master=subw.base)
+        elif targetpath.is_file():  # not dir
+            subw[0][6].disabled = True
+            messagebox.showerror("错误", "目标不能为文件", master=subw.base)
+        else:
+            subw[0][6].disabled = False
 
     mkwd.trace_add("write", mkwd_updator)
 
@@ -176,7 +190,6 @@ def drvmgr():
                 enabled.remove(target.module_name)
             else:
                 enabled.append(target.module_name)
-                enabled.sort()
 
             exops.recursive_update_env_config(cwd.get(), "DRIVER", "+".join(enabled))
 
@@ -214,6 +227,82 @@ def drvmgr():
                     )
                 )
             ) for n, drv in enumerate(res.Data().drivers)
+        ),
+        W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
+            W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
+        )
+    )
+
+
+def adpmgr():
+    adapterenvs: List[StringVar] = [StringVar(value="启用") for _ in res.Data().adapters]  # drivers' states (enabled, disabled)
+    adaptervars: List[StringVar] = [StringVar(value="安装") for _ in res.Data().adapters]  # drivers' states (installed, not installed)
+
+    def update_adapters():
+        distnames = [d.metadata["name"].lower() for d in getdist()]
+
+        # TODO: get enabled adapter info
+        enabled = []
+
+        for n, d in enumerate(res.Data().adapters):
+            if d.project_link in distnames:
+                adaptervars[n].set("已安装")
+            else:
+                adaptervars[n].set("安装")
+            
+            adapterenvs[n].set("禁用" if d.module_name in enabled else "启用")
+
+    update_adapters()
+
+    subw = win.sub_window()
+    subw.title = "NoneBot Desktop - 管理驱动器"
+    subw.resizable = False
+
+    def getnenabledstate(n: int):
+        return "disabled" if adaptervars[n].get() == "安装" else "normal"
+
+    def getninstalledstate(n: int):
+        return "disabled" if adaptervars[n].get() == "内置" or adaptervars[n].get() == "已安装" else "normal"
+
+    def perform(n: int, op: Literal["enabled", "installed"]):
+        target = res.Data().adapters[n]
+        if op == "enabled":
+            # TODO: implement enable state updator
+
+            update_adapters()
+            subw[0][n][1][0].base["state"] = getnenabledstate(n)
+            subw[0][n][1][1].base["state"] = getninstalledstate(n)
+        else:
+            cfp = Path(cwd.get())
+            subw[0][n][1][1].disabled = True
+
+            p, tmp = exops.exec_new_win(
+                cfp,
+                f'''"{exops.find_python(cfp)}" -m pip install "{target.project_link}"'''
+            )
+
+            def _restore():
+                if p:
+                    while p.poll() is None:
+                        pass
+                    os.remove(tmp)
+                    update_adapters()
+                    subw[0][n][1][0].base["state"] = getnenabledstate(n)
+                    subw[0][n][1][1].base["state"] = getninstalledstate(n)
+
+            Thread(target=_restore).start()
+
+    subw /= (
+        W(tk.Frame) * Packer(side="top") / (
+            (
+                W(tk.LabelFrame, text=adp.name, font=font10) * Gridder(column=n % 3, row=n // 3, sticky="nw") / (
+                    W(tk.Label, text=adp.desc, font=font10, width=40, height=3, justify="left") * Packer(anchor="nw", side="top"),
+                    W(tk.Frame) * Packer(anchor="nw", fill="x", side="top", expand=True) / (
+                        W(tk.Button, font=font10, textvariable=adapterenvs[n], command=partial(perform, n, "enabled"), state=getnenabledstate(n)) * Packer(fill="x", side="left", expand=True),
+                        W(tk.Button, font=font10, textvariable=adaptervars[n], command=partial(perform, n, "installed"), state=getninstalledstate(n)) * Packer(fill="x", side="left", expand=True)
+                    )
+                )
+            ) for n, adp in enumerate(res.Data().adapters)
         ),
         W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
             W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
@@ -423,7 +512,7 @@ win /= (
             MenuCommand(label="配置文件编辑器", command=internal_env_edit, font=font10),
             MenuSeparator(),
             MenuCommand(label="管理驱动器", command=drvmgr, font=font10),
-            MenuCommand(label="管理适配器", font=font10),
+            MenuCommand(label="管理适配器", command=adpmgr, font=font10),
             MenuSeparator(),
             MenuCommand(label="管理环境", command=enviroman, font=font10)
         ),
