@@ -9,7 +9,7 @@ from pathlib import Path
 from subprocess import Popen
 import sys
 from threading import Thread
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 t1 = time.perf_counter()
 
@@ -59,6 +59,15 @@ cwd.trace_add("write", cwd_updator)
 
 def getdist():
     return exops.distributions(*(str(Path(cwd.get()) / si) for si in glob(".venv/**/site-packages", root_dir=cwd.get(), recursive=True)))
+
+
+def check_pyproject_toml(workdir: Path, master):
+    if (workdir / "bot.py").exists():
+        if (workdir / "pyproject.toml").exists():
+            messagebox.showwarning("警告", "检测到目录下存在 bot.py，其可能不会使用 pyproject.toml 中的配置项。", master=master)
+        else:
+            messagebox.showerror("错误", "当前目录下没没有 pyproject.toml，无法修改配置。", master=master)
+            raise Exception("当前目录下没没有 pyproject.toml，无法修改配置。")
 
 
 def create_project():
@@ -235,39 +244,46 @@ def drvmgr():
 
 
 def adpmgr():
+    check_pyproject_toml(Path(cwd.get()), master=win)
+
     adapterenvs: List[StringVar] = [StringVar(value="启用") for _ in res.Data().adapters]  # drivers' states (enabled, disabled)
     adaptervars: List[StringVar] = [StringVar(value="安装") for _ in res.Data().adapters]  # drivers' states (installed, not installed)
 
     def update_adapters():
         distnames = [d.metadata["name"].lower() for d in getdist()]
 
-        # TODO: get enabled adapter info
-        enabled = []
+        conf = exops.get_toml_config(cwd.get())
+        if not (data := conf._get_data()):
+            raise RuntimeError("Config file not found!")
+        table: Dict[str, Any] = data.setdefault("tool", {}).setdefault("nonebot", {})
+        _enabled: List[Dict[str, str]] = table.setdefault("adapters", [])
+        enabled = [a["module_name"] for a in _enabled]
 
         for n, d in enumerate(res.Data().adapters):
-            if d.project_link in distnames:
-                adaptervars[n].set("已安装")
-            else:
-                adaptervars[n].set("安装")
-            
+            adaptervars[n].set("卸载" if d.project_link in distnames else "安装")
             adapterenvs[n].set("禁用" if d.module_name in enabled else "启用")
 
     update_adapters()
 
     subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 管理驱动器"
+    subw.title = "NoneBot Desktop - 管理适配器"
     subw.resizable = False
 
     def getnenabledstate(n: int):
         return "disabled" if adaptervars[n].get() == "安装" else "normal"
 
     def getninstalledstate(n: int):
-        return "disabled" if adaptervars[n].get() == "内置" or adaptervars[n].get() == "已安装" else "normal"
+        return "disabled" if adapterenvs[n].get() == "禁用" else "normal"
 
     def perform(n: int, op: Literal["enabled", "installed"]):
         target = res.Data().adapters[n]
         if op == "enabled":
-            # TODO: implement enable state updator
+            slimtarget = res.NBCLI().parser.SimpleInfo.parse_obj(target)
+            conf = exops.get_toml_config(cwd.get())
+            if adapterenvs[n].get() == "禁用":
+                conf.remove_adapter(slimtarget)
+            else:
+                conf.add_adapter(slimtarget)
 
             update_adapters()
             subw[0][n][1][0].base["state"] = getnenabledstate(n)
@@ -275,10 +291,11 @@ def adpmgr():
         else:
             cfp = Path(cwd.get())
             subw[0][n][1][1].disabled = True
+            pip_op = "install" if adaptervars[n].get() == "安装" else "uninstall"
 
             p, tmp = exops.exec_new_win(
                 cfp,
-                f'''"{exops.find_python(cfp)}" -m pip install "{target.project_link}"'''
+                f'''"{exops.find_python(cfp)}" -m pip {pip_op} "{target.project_link}"'''
             )
 
             def _restore():

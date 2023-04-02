@@ -1,12 +1,10 @@
-from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, ParamSpec, Sequence, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, ParamSpec, Sequence, Type, TypeVar
 import nb_cli.handlers.meta
 import nb_cli.config.parser
 import nb_cli.handlers.plugin
 import nb_cli.handlers.project
-from nb_cli.config import Driver, Plugin, Adapter, NoneBotConfig, SimpleInfo
-from tomlkit import TOMLDocument
+from nb_cli.config import Driver, Plugin, Adapter
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -49,46 +47,8 @@ class NBCLI:
     # parser: ModuleType = nb_cli.config.parser
 
     class parser:
-        class ConfigManager:
-            def __init__(
-                self,
-                python: Optional[str] = None,
-                config_file: Path = Path("pyproject.toml"),
-                encoding: str = "utf-8",
-            ):
-                self.python = python
-                self.file = config_file
-                self.encoding = encoding
-
-            def _get_data(self) -> Optional[TOMLDocument]:
-                ...
-
-            def _write_data(self, data: TOMLDocument) -> None:
-                ...
-
-            def _get_nonebot_config(self, data: TOMLDocument) -> Dict[str, Any]:
-                ...
-
-            def get_nonebot_config(self) -> NoneBotConfig:
-                ...
-
-            def add_adapter(self, adapter: SimpleInfo) -> None:
-                ...
-
-            def remove_adapter(self, adapter: SimpleInfo) -> None:
-                ...
-
-            def add_plugin(self, plugin: str) -> None:
-                ...
-
-            def remove_plugin(self, plugin: str) -> None:
-                ...
-
-            def add_builtin_plugin(self, plugin: str) -> None:
-                ...
-
-            def remove_builtin_plugin(self, plugin: str) -> None:
-                ...
+        ConfigManager: Type[nb_cli.config.ConfigManager]
+        SimpleInfo: Type[nb_cli.config.SimpleInfo]
 
     plugin: ModuleType = nb_cli.handlers.plugin
 
