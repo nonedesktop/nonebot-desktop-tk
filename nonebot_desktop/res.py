@@ -1,12 +1,14 @@
 import asyncio
 import importlib.util
 import sys
-from threading import Thread
-from typing import Callable, Generic, ParamSpec, TypeVar
+from threading import Thread, Lock
+from types import ModuleType
+from typing import Callable, Generic, Mapping, ParamSpec, Sequence, TypeVar
 
 T = TypeVar("T")
 P = ParamSpec("P")
 
+_import_lock = Lock()
 
 class BackgroundObject(Generic[P, T]):
     def __init__(self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> None:
@@ -20,6 +22,17 @@ class BackgroundObject(Generic[P, T]):
 
     def _work(self, *args: P.args, **kwargs: P.kwargs) -> None:
         self._value = self._func(*args, **kwargs)
+
+
+def import_with_lock(
+    name: str,
+    globals: Mapping[str, object] | None = None,
+    locals: Mapping[str, object] | None = None,
+    fromlist: Sequence[str] = ...,
+    level: int = 0
+) -> ModuleType:
+    with _import_lock:
+        return __import__(name, globals, locals, fromlist, level)
 
 
 def lazy_import(name):
@@ -40,9 +53,10 @@ class NBCLI:
     def __new__(cls):
         if cls._SINGLETON is None:
             cls._SINGLETON = object.__new__(cls)
-            cls.meta = BackgroundObject(lazy_import, "nb_cli.handlers.meta")
-            cls.plugin = BackgroundObject(lazy_import, "nb_cli.handlers.plugin")
-            cls.project = BackgroundObject(lazy_import, "nb_cli.handlers.project")
+            cls.meta = BackgroundObject(import_with_lock, "nb_cli.handlers.meta")
+            cls.parser = BackgroundObject(import_with_lock, "nb_cli.config.parser")
+            cls.plugin = BackgroundObject(import_with_lock, "nb_cli.handlers.plugin")
+            cls.project = BackgroundObject(import_with_lock, "nb_cli.handlers.project")
         return cls._SINGLETON
 
 

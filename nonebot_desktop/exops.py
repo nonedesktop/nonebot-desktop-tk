@@ -6,10 +6,13 @@ from shutil import which
 import subprocess
 import sys
 from tempfile import mkstemp
-from typing import Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 from venv import create as create_venv
 from importlib import metadata
 from dotenv.main import DotEnv
+
+if TYPE_CHECKING:
+    from nb_cli.config import Driver, Adapter
 
 from nonebot_desktop.res import NBCLI
 
@@ -58,7 +61,7 @@ def get_pause_cmd():
     return "read -n1 -p 进程已结束，按任意键关闭。"
 
 
-def create(fp: str, drivers: list, adapters: list, dev: bool, usevenv: bool, index: Optional[str] = None):
+def create(fp: str, drivers: List["Driver"], adapters: List["Adapter"], dev: bool, usevenv: bool, index: Optional[str] = None):
     p = Path(fp)
     if p.exists():
         p.rmdir()
@@ -164,3 +167,8 @@ def recursive_update_env_config(fp: Union[str, Path], config: str, value: str):
 
     with open(cp, "w") as f:
         f.writelines(f"{k}={v}\n" for k, v in useenv.items() if k and v)
+
+
+def get_toml_config(basedir: Union[str, Path]):
+    basepath = Path(basedir)
+    return NBCLI().parser.ConfigManager(str(find_python(basepath)), basepath / "pyproject.toml")

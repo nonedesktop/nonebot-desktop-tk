@@ -523,11 +523,6 @@ win /= (
         M(MenuCascade(label="高级", font=font10), tearoff=False) * MenuBinder() / (
             MenuCommand(label="打开命令行窗口", font=font10, command=lambda: exops.open_new_win(Path(cwd.get()))),
             MenuSeparator(),
-            MenuCommand(label="创建插件", font=font10),
-            MenuSeparator(),
-            MenuCommand(label="释放 bot.py", font=font10),
-            MenuCommand(label="编辑 bot.py", font=font10, command=lambda: exops.system_open(Path(cwd.get()) / "bot.py")),
-            MenuSeparator(),
             MenuCommand(label="编辑 pyproject.toml", font=font10, command=lambda: exops.system_open(Path(cwd.get()) / "pyproject.toml"))
         ),
         M(MenuCascade(label="帮助", font=font10), tearoff=False) * MenuBinder() / (
