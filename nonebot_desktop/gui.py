@@ -278,7 +278,7 @@ def adpmgr():
     def perform(n: int, op: Literal["enabled", "installed"]):
         target = res.Data().adapters[n]
         if op == "enabled":
-            slimtarget = res.NBCLI().parser.SimpleInfo.parse_obj(target)
+            slimtarget = res.NBCLI().config.SimpleInfo.parse_obj(target)
             conf = exops.get_toml_config(cwd.get())
             if adapterenvs[n].get() == "禁用":
                 conf.remove_adapter(slimtarget)
@@ -560,6 +560,7 @@ cwd_updator()
 
 t4 = time.perf_counter()
 
+
 def start_window():
     print(f"Import base: {t1 - t0:.3f}s")
     print(f"Import tkinter: {t1_1 - t1:.3f}s")
@@ -568,4 +569,5 @@ def start_window():
     print(f"Init Sub Functions: {t3 - t2:.3f}s")
     print(f"Main UI Ready: {t4 - t3:.3f}s")
     print(f"Total: {t4 - t1:.3f}s")
+    Thread(target=res.Data).start()
     win.loop()

@@ -43,18 +43,7 @@ class NBCLI:
     def __new__(cls) -> NBCLI:
         ...
 
-    meta: ModuleType = nb_cli.handlers.meta
-    # parser: ModuleType = nb_cli.config.parser
-
-    class parser:
-        ConfigManager: Type[nb_cli.config.ConfigManager]
-        SimpleInfo: Type[nb_cli.config.SimpleInfo]
-
-    plugin: ModuleType = nb_cli.handlers.plugin
-
-    # project: ModuleType = nb_cli.handlers.project
-
-    class project:
+    class handlers:
         @staticmethod
         def create_project(
             project_template: str,
@@ -63,6 +52,10 @@ class NBCLI:
             no_input: bool = True,
         ) -> None:
             ...
+
+    class config:
+        ConfigManager: Type[nb_cli.config.ConfigManager]
+        SimpleInfo: Type[nb_cli.config.SimpleInfo]
 
 
 class Data:

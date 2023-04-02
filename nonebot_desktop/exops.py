@@ -65,7 +65,7 @@ def create(fp: str, drivers: List["Driver"], adapters: List["Adapter"], dev: boo
     p = Path(fp)
     if p.exists():
         p.rmdir()
-    NBCLI().project.create_project(
+    NBCLI().handlers.create_project(
         "simple" if dev else "bootstrap",
         {
             "nonebot": {
@@ -171,4 +171,4 @@ def recursive_update_env_config(fp: Union[str, Path], config: str, value: str):
 
 def get_toml_config(basedir: Union[str, Path]):
     basepath = Path(basedir)
-    return NBCLI().parser.ConfigManager(str(find_python(basepath)), basepath / "pyproject.toml")
+    return NBCLI().config.ConfigManager(str(find_python(basepath)), basepath / "pyproject.toml")

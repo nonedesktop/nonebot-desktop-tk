@@ -1,9 +1,13 @@
 import asyncio
+from distutils.version import StrictVersion
+from importlib.metadata import version
 import importlib.util
+from importlib import import_module
 import sys
 from threading import Thread, Lock
 from types import ModuleType
-from typing import Callable, Generic, Mapping, ParamSpec, Sequence, TypeVar
+from typing import Callable, Generic, Optional, ParamSpec, TypeVar
+
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -15,6 +19,7 @@ class BackgroundObject(Generic[P, T]):
         self._func = func
         self._thread = Thread(None, self._work, None, args, kwargs)
         self._thread.start()
+        print(f"{func.__name__!r} is running in background with {args=}, {kwargs=}")
 
     def __get__(self, obj, objtype=None) -> T:
         self._thread.join()
@@ -26,13 +31,10 @@ class BackgroundObject(Generic[P, T]):
 
 def import_with_lock(
     name: str,
-    globals: Mapping[str, object] | None = None,
-    locals: Mapping[str, object] | None = None,
-    fromlist: Sequence[str] = ...,
-    level: int = 0
+    package: Optional[str] = None
 ) -> ModuleType:
     with _import_lock:
-        return __import__(name, globals, locals, fromlist, level)
+        return import_module(name, package)
 
 
 def lazy_import(name):
@@ -53,10 +55,12 @@ class NBCLI:
     def __new__(cls):
         if cls._SINGLETON is None:
             cls._SINGLETON = object.__new__(cls)
-            cls.meta = BackgroundObject(import_with_lock, "nb_cli.handlers.meta")
-            cls.parser = BackgroundObject(import_with_lock, "nb_cli.config.parser")
-            cls.plugin = BackgroundObject(import_with_lock, "nb_cli.handlers.plugin")
-            cls.project = BackgroundObject(import_with_lock, "nb_cli.handlers.project")
+            cls.handlers = BackgroundObject(import_with_lock, "nb_cli.handlers", "*")
+            if StrictVersion(version("nb-cli")) <= StrictVersion("1.0.5"):
+                cls.config = BackgroundObject(import_with_lock, "nb_cli.config", "*")
+            else:
+                # for future compatibility
+                cls.config = cls.handlers
         return cls._SINGLETON
 
 
@@ -83,11 +87,11 @@ class Data:
     def __new__(cls):
         if cls._SINGLETON is None:
             cls._SINGLETON = object.__new__(cls)
-            cls.drivers = BackgroundObject(asyncio.run, NBCLI().meta.load_module_data("driver"))
-            cls.adapters = BackgroundObject(asyncio.run, NBCLI().meta.load_module_data("adapter"))
-            cls.plugins = BackgroundObject(asyncio.run, NBCLI().meta.load_module_data("plugin"))
+            cls.drivers = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("driver"))
+            cls.adapters = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("adapter"))
+            cls.plugins = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("plugin"))
         return cls._SINGLETON
 
 
 def get_builtin_plugins(pypath: str):
-    return asyncio.run(NBCLI().plugin.list_builtin_plugins(python_path=pypath))
+    return asyncio.run(NBCLI().handlers.list_builtin_plugins(python_path=pypath))
