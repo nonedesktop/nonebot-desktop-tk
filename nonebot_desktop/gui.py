@@ -561,7 +561,7 @@ def plugin_store():
     all_plugins_paged = res.list_paginate(res.Data().raw_plugins, 10)
     cur_plugins_paged = all_plugins_paged
     pageinfo_cpage = 0
-    pageinfo_mpage = len(all_plugins_paged)
+    pageinfo_mpage = len(cur_plugins_paged)
 
     def _getrealpageinfo():
         return f"第 {pageinfo_cpage + 1}/{pageinfo_mpage} 页"
@@ -588,10 +588,10 @@ def plugin_store():
     )
 
     def update_page():
-        plugins_display = [x for x in all_plugins_paged[pageinfo_cpage]]
+        plugins_display = [x for x in cur_plugins_paged[pageinfo_cpage]]
         subw[1] /= (
             (
-                W(tk.LabelFrame, text=_getpluginextendedname(pl), font=font10) * Gridder(column=n & 1, row=n // 2, sticky="w") / (
+                W(tk.LabelFrame, text=_getpluginextendedname(pl), fg="green" if pl["is_official"] else "black", font=font10) * Gridder(column=n & 1, row=n // 2, sticky="w") / (
                     W(tk.Label, text=pl["desc"], font=font10, width=40, height=4, wraplength=320, justify="left") * Packer(anchor="w", expand=True, fill="x", padx=5, pady=5, side="left"),
                     W(tk.Button, text="主页", font=font10) * Packer(anchor="w", side="left"),
                     W(tk.Button, text="enable", font=font10) * Packer(anchor="w", side="left"),

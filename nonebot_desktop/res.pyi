@@ -56,6 +56,20 @@ class NBCLI:
         SimpleInfo: Type[nb_cli.config.SimpleInfo]
 
 
+RawPlugin = dict[
+    {
+        "module_name": str,
+        "project_link": str,
+        "name": str,
+        "desc": str,
+        "author": str,
+        "homepage": str,
+        "tags": List[dict[{"label": str, "color": str}]],
+        "is_official": bool
+    }
+]
+
+
 class Data:
     _SINGLETON: Optional[Data]
 
@@ -65,18 +79,7 @@ class Data:
     drivers: List[Driver]
     adapters: List[Adapter]
     plugins: List[Plugin]
-    raw_plugins: List[dict[
-        {
-            "module_name": str,
-            "project_link": str,
-            "name": str,
-            "desc": str,
-            "author": str,
-            "homepage": str,
-            "tags": List[dict[{"label": str, "color": str}]],
-            "is_official": bool
-        }
-    ]]
+    raw_plugins: List[RawPlugin]
 
 
 def get_builtin_plugins(pypath: str) -> List[str]:
