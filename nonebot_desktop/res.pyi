@@ -1,9 +1,7 @@
 from types import ModuleType
 from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, ParamSpec, Sequence, Type, TypeVar
-import nb_cli.handlers.meta
-import nb_cli.config.parser
-import nb_cli.handlers.plugin
-import nb_cli.handlers.project
+import nb_cli.handlers
+import nb_cli.config
 from nb_cli.config import Driver, Plugin, Adapter
 
 T = TypeVar("T")
@@ -67,7 +65,23 @@ class Data:
     drivers: List[Driver]
     adapters: List[Adapter]
     plugins: List[Plugin]
+    raw_plugins: List[dict[
+        {
+            "module_name": str,
+            "project_link": str,
+            "name": str,
+            "desc": str,
+            "author": str,
+            "homepage": str,
+            "tags": List[dict[{"label": str, "color": str}]],
+            "is_official": bool
+        }
+    ]]
 
 
 def get_builtin_plugins(pypath: str) -> List[str]:
+    ...
+
+
+def list_paginate(lst: List[T], sz: int) -> List[List[T]]:
     ...

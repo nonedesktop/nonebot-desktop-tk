@@ -66,8 +66,8 @@ def check_pyproject_toml(workdir: Path, master):
         if (workdir / "pyproject.toml").exists():
             messagebox.showwarning("警告", "检测到目录下存在 bot.py，其可能不会使用 pyproject.toml 中的配置项。", master=master)
         else:
-            messagebox.showerror("错误", "当前目录下没没有 pyproject.toml，无法修改配置。", master=master)
-            raise Exception("当前目录下没没有 pyproject.toml，无法修改配置。")
+            messagebox.showerror("错误", "当前目录下没有 pyproject.toml，无法修改配置。", master=master)
+            raise Exception("当前目录下没有 pyproject.toml，无法修改配置。")
 
 
 def create_project():
@@ -327,6 +327,46 @@ def adpmgr():
     )
 
 
+def builtin_plugins():
+    check_pyproject_toml(Path(cwd.get()), win.base)
+    subw = win.sub_window()
+    subw.title = "NoneBot Desktop - 管理内置插件"
+
+    bplugins = res.get_builtin_plugins(str(exops.find_python(Path(cwd.get()))))
+    opstate = [StringVar(value="启用") for _ in bplugins]
+
+    def updstate():
+        cfg = exops.get_toml_config(cwd.get())
+        if not (data := cfg._get_data()):
+            raise RuntimeError("Config file not found!")
+        table: Dict[str, Any] = data.setdefault("tool", {}).setdefault("nonebot", {})
+        plugins: List[str] = table.setdefault("builtin_plugins", [])
+        for n, pl in enumerate(bplugins):
+            if pl in plugins:
+                opstate[n].set("禁用")
+            else:
+                opstate[n].set("启用")
+
+    updstate()
+
+    def setnstate(n: int):
+        cfg = exops.get_toml_config(cwd.get())
+        if opstate[n].get() == "启用":
+            cfg.add_builtin_plugin(bplugins[n])
+        else:
+            cfg.remove_builtin_plugin(bplugins[n])
+        updstate()
+
+    subw /= (
+        (
+            W(tk.Frame) * Packer(anchor="nw", fill="x", side="top") / (
+                W(tk.Label, text=bp, font=font10, justify="left") * Packer(anchor="w", expand=True, fill="x", side="left"),
+                W(tk.Button, textvariable=opstate[n], command=partial(setnstate, n), font=font10) * Packer(anchor="w", side="left")
+            )
+        ) for n, bp in enumerate(bplugins)
+    )
+
+
 def enviroman():
     subw = win.sub_window()
     subw.title = "NoneBot Desktop - 管理环境"
@@ -512,6 +552,91 @@ def internal_env_edit():
     )
     envf_updator()
 
+
+def plugin_store():
+    check_pyproject_toml(Path(cwd.get()), win.base)
+    subw = win.sub_window()
+    subw.title = "NoneBot Desktop - 插件商店"
+
+    all_plugins_paged = res.list_paginate(res.Data().raw_plugins, 10)
+    cur_plugins_paged = all_plugins_paged
+    pageinfo_cpage = 0
+    pageinfo_mpage = len(all_plugins_paged)
+
+    def _getrealpageinfo():
+        return f"第 {pageinfo_cpage + 1}/{pageinfo_mpage} 页"
+
+    def _getpluginextendedname(plugin):
+        if plugin["name"] == plugin["project_link"]:
+            return "{name} by {author}".format(**plugin)
+        if plugin["project_link"].startswith("git+"):
+            return "{name} (git+...) by {author}".format(**plugin)
+        return "{name} ({project_link}) by {author}".format(**plugin)
+
+    subw /= (
+        W(tk.LabelFrame, text="搜索", font=font10) * Packer(anchor="nw", expand=True, fill="x") / (
+            W(tk.Entry, font=font10) * Packer(expand=True, fill="x"),
+        ),
+        W(tk.LabelFrame, text=_getrealpageinfo(), font=font10) * Packer(anchor="w", expand=True, fill="x"),
+        W(tk.Frame) * Packer(anchor="sw", expand=True, fill="x") / (
+            W(tk.Button, text="首页", font=font10, command=lambda: chpage(-pageinfo_cpage)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
+            W(tk.Button, text="上一页", font=font10, command=lambda: chpage(-1)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
+            W(ttk.Combobox, font=font10) * Packer(anchor="nw", expand=True, fill="x", side="left"),
+            W(tk.Button, text="下一页", font=font10, command=lambda: chpage(1)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
+            W(tk.Button, text="尾页", font=font10, command=lambda: chpage(pageinfo_mpage - pageinfo_cpage - 1)) * Packer(anchor="nw", expand=True, fill="x", side="left")
+        )
+    )
+
+    def update_page():
+        plugins_display = [x for x in all_plugins_paged[pageinfo_cpage]]
+        subw[1] /= (
+            (
+                W(tk.LabelFrame, text=_getpluginextendedname(pl), font=font10) * Gridder(column=n & 1, row=n // 2, sticky="w") / (
+                    W(tk.Label, text=pl["desc"], font=font10, width=40, height=4, wraplength=320, justify="left") * Packer(anchor="w", expand=True, fill="x", padx=5, pady=5, side="left"),
+                    W(tk.Button, text="主页", font=font10) * Packer(anchor="w", side="left"),
+                    W(tk.Button, text="enable", font=font10) * Packer(anchor="w", side="left"),
+                    W(tk.Button, text="install", font=font10) * Packer(anchor="w", side="left"),
+                )
+            ) for n, pl in enumerate(plugins_display)
+        )
+
+    def chpage(offset: int):
+        nonlocal pageinfo_cpage
+        pageinfo_cpage = (pageinfo_cpage + offset) % pageinfo_mpage
+        subw[1].text = _getrealpageinfo()
+        update_page()
+
+    update_page()
+
+
+def app_help():
+    subw = win.sub_window()
+    subw.title = "NoneBot Desktop - 使用手册"
+
+    # W.I.P.
+    subw /= ()
+
+
+def app_about():
+    subw = win.sub_window()
+    subw.title = "NoneBot Desktop - 关于"
+
+    url = "https://github.com/NCBM/nonebot-desktop-tk"
+    msg = subw.add_widget(tk.Message, width=400, font=font10)
+    msg.text = (
+        "NoneBot Desktop (Tkinter) 1.0.0a1\n"
+        "(C) 2023 NCBM (Nhanchou Baimin, 南舟白明, worldmozara)\n"
+        "该项目使用 MIT 协议开源。\n"
+        f"项目主页: {url}"
+    )
+    msg.pack(padx=10, pady=10)
+
+    hpg = subw.add_widget(tk.Button, font=font10)
+    hpg.text = "前往项目主页"
+    hpg.command(lambda: exops.system_open(url))
+    hpg.pack(fill="x", expand=True)
+
+
 t3 = time.perf_counter()
 
 win /= (
@@ -534,8 +659,8 @@ win /= (
             MenuCommand(label="管理环境", command=enviroman, font=font10)
         ),
         M(MenuCascade(label="插件", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="管理内置插件", font=font10),
-            MenuCommand(label="插件商店", font=font10),
+            MenuCommand(label="管理内置插件", command=builtin_plugins, font=font10),
+            MenuCommand(label="插件商店", command=plugin_store, font=font10),
         ),
         M(MenuCascade(label="高级", font=font10), tearoff=False) * MenuBinder() / (
             MenuCommand(label="打开命令行窗口", font=font10, command=lambda: exops.open_new_win(Path(cwd.get()))),
@@ -543,8 +668,8 @@ win /= (
             MenuCommand(label="编辑 pyproject.toml", font=font10, command=lambda: exops.system_open(Path(cwd.get()) / "pyproject.toml"))
         ),
         M(MenuCascade(label="帮助", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="使用手册", font=font10),
-            MenuCommand(label="关于", font=font10)
+            MenuCommand(label="使用手册", command=app_help, font=font10),
+            MenuCommand(label="关于", command=app_about, font=font10)
         )
     ),
     W(tk.Frame) * Gridder() / (

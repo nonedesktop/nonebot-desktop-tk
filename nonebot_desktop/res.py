@@ -1,12 +1,18 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from distutils.version import StrictVersion
+from functools import cache
 from importlib.metadata import version
 import importlib.util
 from importlib import import_module
 import sys
 from threading import Thread, Lock
+import traceback
 from types import ModuleType
-from typing import Callable, Generic, Optional, ParamSpec, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Literal, Optional, ParamSpec, TypeVar
+import warnings
+
+import httpx
 
 
 T = TypeVar("T")
@@ -19,7 +25,7 @@ class BackgroundObject(Generic[P, T]):
         self._func = func
         self._thread = Thread(None, self._work, None, args, kwargs)
         self._thread.start()
-        print(f"{func.__name__!r} is running in background with {args=}, {kwargs=}")
+        print(f"Info: '{func.__module__}.{func.__name__}' is running in background with {args=}, {kwargs=}")
 
     def __get__(self, obj, objtype=None) -> T:
         self._thread.join()
@@ -27,6 +33,7 @@ class BackgroundObject(Generic[P, T]):
 
     def _work(self, *args: P.args, **kwargs: P.kwargs) -> None:
         self._value = self._func(*args, **kwargs)
+        print(f"Info: '{self._func.__module__}.{self._func.__name__}' is done with {args=}, {kwargs=}")
 
 
 def import_with_lock(
@@ -57,10 +64,11 @@ class NBCLI:
             cls._SINGLETON = object.__new__(cls)
             cls.handlers = BackgroundObject(import_with_lock, "nb_cli.handlers", "*")
             if StrictVersion(version("nb-cli")) <= StrictVersion("1.0.5"):
-                cls.config = BackgroundObject(import_with_lock, "nb_cli.config", "*")
-            else:
-                # for future compatibility
-                cls.config = cls.handlers
+                warnings.warn(
+                    "You are using a nb-cli which includes a bug (see gh:nonebot/nb-cli#74). "
+                    "Please upgrade your nb-cli (>1.0.5) to avoid the bug."
+                )
+            cls.config = BackgroundObject(import_with_lock, "nb_cli.config", "*")
         return cls._SINGLETON
 
 
@@ -81,6 +89,29 @@ PYPI_MIRRORS = [
 ]
 
 
+@cache
+def load_module_data_raw(
+    module_name: Literal["adapters", "plugins", "drivers"]
+) -> List[Dict[str, Any]]:
+    exceptions: List[Exception] = []
+    urls = [
+        f"https://v2.nonebot.dev/{module_name}.json",
+        f"https://raw.fastgit.org/nonebot/nonebot2/master/website/static/{module_name}.json",
+        f"https://cdn.jsdelivr.net/gh/nonebot/nonebot2/website/static/{module_name}.json",
+    ]
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        tasks = [executor.submit(httpx.get, url) for url in urls]
+
+        for future in as_completed(tasks):
+            try:
+                resp = future.result()
+                return resp.json()
+            except Exception as e:
+                exceptions.append(e)
+
+    raise Exception("Download failed", exceptions)
+
+
 class Data:
     _SINGLETON = None
 
@@ -90,8 +121,13 @@ class Data:
             cls.drivers = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("driver"))
             cls.adapters = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("adapter"))
             cls.plugins = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("plugin"))
+            cls.raw_plugins = BackgroundObject(load_module_data_raw, "plugins")
         return cls._SINGLETON
 
 
 def get_builtin_plugins(pypath: str):
     return asyncio.run(NBCLI().handlers.list_builtin_plugins(python_path=pypath))
+
+
+def list_paginate(lst: List[T], sz: int) -> List[List[T]]:
+    return [lst[st:st + sz] for st in range(0, len(lst), sz)]
