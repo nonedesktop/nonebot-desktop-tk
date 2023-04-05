@@ -31,8 +31,8 @@ def import_with_lock(
     ...
 
 
-def lazy_import(name: str) -> ModuleType:
-    ...
+# def lazy_import(name: str) -> ModuleType:
+#     ...
 
 
 class NBCLI:

@@ -1,19 +1,16 @@
+from time import perf_counter
+
+t0 = perf_counter()
+
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from distutils.version import StrictVersion
 from functools import cache
-from importlib.metadata import version
-import importlib.util
-from importlib import import_module
-import sys
 from threading import Thread, Lock
-import traceback
 from types import ModuleType
 from typing import Any, Callable, Dict, Generic, List, Literal, Optional, ParamSpec, TypeVar
 import warnings
 
-import httpx
-
+t1 = perf_counter()
+print(f"[res] Import system module: {t1 - t0:.3f}s")
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -25,7 +22,7 @@ class BackgroundObject(Generic[P, T]):
         self._func = func
         self._thread = Thread(None, self._work, None, args, kwargs)
         self._thread.start()
-        print(f"Info: '{func.__module__}.{func.__name__}' is running in background with {args=}, {kwargs=}")
+        print(f"[BackgroundObject] '{func.__module__}.{func.__name__}' is running in background with {args=}, {kwargs=}")
 
     def __get__(self, obj, objtype=None) -> T:
         self._thread.join()
@@ -33,33 +30,38 @@ class BackgroundObject(Generic[P, T]):
 
     def _work(self, *args: P.args, **kwargs: P.kwargs) -> None:
         self._value = self._func(*args, **kwargs)
-        print(f"Info: '{self._func.__module__}.{self._func.__name__}' is done with {args=}, {kwargs=}")
+        print(f"[BackgroundObject] '{self._func.__module__}.{self._func.__name__}' is done with {args=}, {kwargs=}")
 
 
 def import_with_lock(
     name: str,
     package: Optional[str] = None
 ) -> ModuleType:
+    from importlib import import_module
     with _import_lock:
         return import_module(name, package)
 
 
-def lazy_import(name):
-    spec = importlib.util.find_spec(name)
-    if spec is None:
-        raise ImportError(f"cannot import {name}")
-    loader = importlib.util.LazyLoader(spec.loader)  # type: ignore
-    spec.loader = loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    loader.exec_module(module)
-    return module
+# def lazy_import(name):
+#     import importlib.util
+#     import sys
+#     spec = importlib.util.find_spec(name)
+#     if spec is None:
+#         raise ImportError(f"cannot import {name}")
+#     loader = importlib.util.LazyLoader(spec.loader)  # type: ignore
+#     spec.loader = loader
+#     module = importlib.util.module_from_spec(spec)
+#     sys.modules[name] = module
+#     loader.exec_module(module)
+#     return module
 
 
 class NBCLI:
     _SINGLETON = None
 
     def __new__(cls):
+        from importlib.metadata import version
+        from distutils.version import StrictVersion
         if cls._SINGLETON is None:
             cls._SINGLETON = object.__new__(cls)
             cls.handlers = BackgroundObject(import_with_lock, "nb_cli.handlers", "*")
@@ -93,6 +95,8 @@ PYPI_MIRRORS = [
 def load_module_data_raw(
     module_name: Literal["adapters", "plugins", "drivers"]
 ) -> List[Dict[str, Any]]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import httpx
     exceptions: List[Exception] = []
     urls = [
         f"https://v2.nonebot.dev/{module_name}.json",
@@ -131,3 +135,7 @@ def get_builtin_plugins(pypath: str):
 
 def list_paginate(lst: List[T], sz: int) -> List[List[T]]:
     return [lst[st:st + sz] for st in range(0, len(lst), sz)]
+
+t2 = perf_counter()
+print(f"[res] Setup resources: {t2 - t1:.3f}s")
+print(f"[res] Total: {t2 - t0:.3f}s")
