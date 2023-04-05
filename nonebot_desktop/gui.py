@@ -586,7 +586,7 @@ def plugin_store():
             cpage = pageinfo_cpage.get()
         except TclError:
             return
-        curpage = cur_plugins_paged[cpage - 1]
+        curpage = cur_plugins_paged[cpage - 1] if cur_plugins_paged else []
         conf = exops.get_toml_config(cwd.get())
         if not (data := conf._get_data()):
             raise RuntimeError("Config file not found!")
@@ -628,19 +628,31 @@ def plugin_store():
     searchvar = StringVar(value="")
     search_timer = Timer(0.8, lambda: None)
 
-    def do_search():
+    sortvar = StringVar(value="发布时间（旧-新）")
+    sortvalues = {
+        "发布时间（旧-新）": lambda x: x,
+        "发布时间（新-旧）": lambda x: list(reversed(x)),
+        "模块名（A-Z）": lambda x: sorted(x, key=lambda p: p["module_name"]),
+    }
+
+    def do_search(*_):
+        sortkey = sortvar.get()
+        if sortkey not in sortvalues:
+            return
         nonlocal cur_plugins_paged
         kwd = searchvar.get().lower()
         if not kwd:
-            cur_plugins_paged = all_plugins_paged
+            cur_plugins_paged = res.list_paginate(sortvalues[sortkey](all_plugins), PAGESIZE)
         else:
             kwds = kwd.split()
             cur_plugins_paged = res.list_paginate(
-                [x for x in all_plugins if all(k in plugin_context(x) for k in kwds)],
+                sortvalues[sortkey]([x for x in all_plugins if all(k in plugin_context(x) for k in kwds)]),
                 PAGESIZE
             )
         updpageinfo()
         gotopage(0)
+
+    sortvar.trace_add("write", do_search)
 
     @partial(searchvar.trace_add, "write")
     def applysearch(*_):
@@ -670,7 +682,7 @@ def plugin_store():
         except TclError:
             return
 
-        subw[0][0].disabled = True
+        subw[0][0][0].disabled = True
         for i in range(5):
             subw[3][i].disabled = True
 
@@ -693,7 +705,7 @@ def plugin_store():
                 updpluginvars()
                 subw[1][n][1][1].base["state"] = getnenabledstate(n)
                 subw[1][n][1][2].base["state"] = getninstalledstate(n)
-                subw[0][0].disabled = False
+                subw[0][0][0].disabled = False
                 for i in range(5):
                     subw[3][i].disabled = False
 
@@ -716,8 +728,13 @@ def plugin_store():
         subw[1][n][1][2].base["state"] = getninstalledstate(n)
 
     subw /= (
-        W(tk.LabelFrame, text="搜索", font=font10) * Packer(anchor="nw", expand=True, fill="x") / (
-            W(tk.Entry, textvariable=searchvar, font=font10) * Packer(expand=True, fill="x"),
+        W(tk.Frame) * Packer(anchor="nw", expand=True, fill="x") / (
+            W(tk.LabelFrame, text="搜索", font=font10) * Packer(anchor="nw", expand=True, fill="x", side="left") / (
+                W(tk.Entry, textvariable=searchvar, font=font10) * Packer(expand=True, fill="x"),
+            ),
+            W(tk.LabelFrame, text="排序", font=font10) * Packer(anchor="nw", side="left") / (
+                W(ttk.Combobox, textvariable=sortvar, value=list(sortvalues.keys()), font=font10) * Packer(expand=True, fill="x"),
+            ),
         ),
         W(tk.LabelFrame, text=_getrealpageinfo(), font=font10) * Packer(anchor="nw", expand=True, fill="x"),
         W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", expand=True) / (
@@ -740,7 +757,7 @@ def plugin_store():
         updpluginvars()
         LABEL_NCH = 40
         LABEL_NCH_PX_FACTOR = 8
-        plugins_display = [x for x in cur_plugins_paged[cpage - 1]]
+        plugins_display = cur_plugins_paged[cpage - 1] if cur_plugins_paged else []
         subw[1] /= (
             (
                 W(tk.LabelFrame, text=_getpluginextendedname(pl), fg="green" if pl["is_official"] else "black", font=font10) * Gridder(column=n & 1, row=n // 2, sticky="w") / (
