@@ -7,7 +7,6 @@ from functools import cache
 from threading import Thread, Lock
 from types import ModuleType
 from typing import Any, Callable, Dict, Generic, List, Literal, Optional, ParamSpec, TypeVar
-import warnings
 
 t1 = perf_counter()
 print(f"[res] Import system module: {t1 - t0:.3f}s")
@@ -60,16 +59,9 @@ class NBCLI:
     _SINGLETON = None
 
     def __new__(cls):
-        from importlib.metadata import version
-        from distutils.version import StrictVersion
         if cls._SINGLETON is None:
             cls._SINGLETON = object.__new__(cls)
             cls.handlers = BackgroundObject(import_with_lock, "nb_cli.handlers", "*")
-            if StrictVersion(version("nb-cli")) <= StrictVersion("1.0.5"):
-                warnings.warn(
-                    "You are using a nb-cli which includes a bug (see gh:nonebot/nb-cli#74). "
-                    "Please upgrade your nb-cli (>1.0.5) to avoid the bug."
-                )
             cls.config = BackgroundObject(import_with_lock, "nb_cli.config", "*")
         return cls._SINGLETON
 

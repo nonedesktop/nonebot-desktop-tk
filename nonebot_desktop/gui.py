@@ -49,6 +49,13 @@ win.resizable = False
 cwd = StringVar(value="[点击“项目”菜单新建或打开项目]")
 tmpindex = StringVar()
 curproc: Optional[Popen[bytes]] = None
+curdistnames: List[str] = []
+
+
+def upddists():
+    global curdistnames
+    curdistnames = [d.metadata["name"].lower() for d in getdist()]
+    print("[upddists] Updated current dists")
 
 
 def cwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
@@ -58,6 +65,10 @@ def cwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
     w = list(m.children.values())[0]
     for entry in (2, 3, 4):
         m.entryconfig(entry, state="disabled" if win[1][1].disabled else "normal")
+    if win[1][1].disabled:
+        return
+    Thread(target=upddists).start()
+    print(f"[cwd_updator] Current directory is set to {cwd.get()!r}")
 
 
 cwd.trace_add("write", cwd_updator)
@@ -74,6 +85,23 @@ def check_pyproject_toml(workdir: Path, master):
         else:
             messagebox.showerror("错误", "当前目录下没有 pyproject.toml，无法修改配置。", master=master)
             raise Exception("当前目录下没有 pyproject.toml，无法修改配置。")
+
+
+def bg2fg(color: str):
+    c_int = int(color[1:], base=16)
+    # c_rsh = (len(color) - 1) // 3
+    # c_msk = 0xf  # 0b00001111
+    # for _ in range(1, c_rsh):
+    #     c_msk = (c_msk << 4) + c_msk
+    #
+    # Formula for choosing color:
+    # 0.2126 × R + 0.7152 × G + 0.0722 × B > 0.5
+    c_bgr: List[int] = []
+    for _ in range(3):
+        c_bgr.append(0xff if (c_int & (0xff) <= 0x7f) else 0)
+        c_int >>= 8
+    b, g, r = (x / 255 for x in c_bgr)
+    return "#{0:02x}{0:02x}{0:02x}".format(0xff * int(0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5))
 
 
 def create_project():
@@ -164,7 +192,6 @@ def drvmgr():
     drivervars: List[StringVar] = [StringVar(value="安装") for _ in res.Data().drivers]  # drivers' states (installed, not installed)
 
     def update_drivers():
-        distnames = [d.metadata["name"].lower() for d in getdist()]
         _enabled = exops.recursive_find_env_config(cwd.get(), "DRIVER")
         if _enabled is None:
             enabled = []
@@ -172,7 +199,7 @@ def drvmgr():
             enabled = _enabled.split("+")
 
         for n, d in enumerate(res.Data().drivers):
-            if d.name.lower() in distnames:
+            if d.name.lower() in curdistnames:
                 drivervars[n].set("已安装")
             elif d.name != "None":
                 drivervars[n].set("安装")
@@ -210,6 +237,7 @@ def drvmgr():
 
             exops.recursive_update_env_config(cwd.get(), "DRIVER", "+".join(enabled))
 
+            upddists()
             update_drivers()
             subw[0][n][1][0].base["state"] = getnenabledstate(n)
             subw[0][n][1][1].base["state"] = getninstalledstate(n)
@@ -258,8 +286,6 @@ def adpmgr():
     adaptervars: List[StringVar] = [StringVar(value="安装") for _ in res.Data().adapters]  # adapters' states (installed, not installed)
 
     def update_adapters():
-        distnames = [d.metadata["name"].lower() for d in getdist()]
-
         conf = exops.get_toml_config(cwd.get())
         if not (data := conf._get_data()):
             raise RuntimeError("Config file not found!")
@@ -268,7 +294,7 @@ def adpmgr():
         enabled = [a["module_name"] for a in _enabled]
 
         for n, d in enumerate(res.Data().adapters):
-            adaptervars[n].set("卸载" if d.project_link in distnames else "安装")
+            adaptervars[n].set("卸载" if d.project_link in curdistnames else "安装")
             adapterenvs[n].set("禁用" if d.module_name in enabled else "启用")
 
     update_adapters()
@@ -312,6 +338,7 @@ def adpmgr():
                     while p.poll() is None:
                         pass
                     os.remove(tmp)
+                    upddists()
                     update_adapters()
                     subw[0][n][1][0].base["state"] = getnenabledstate(n)
                     subw[0][n][1][1].base["state"] = getninstalledstate(n)
@@ -395,7 +422,9 @@ def enviroman():
         _dist_index.clear()
         _dist_index.update({d.name: d for d in _dists})
 
-        dists.set([x for x in _dist_index])  # type: ignore
+        global curdistnames
+        dists.set(curdistnames := [x for x in _dist_index])  # type: ignore
+        print("[environman::update_dists_list] Updated current distnames in global")
 
     update_dists_list()
 
@@ -572,7 +601,6 @@ def plugin_store():
     subw.base.grab_set()
 
     PAGESIZE = 8
-    distnames = [d.metadata["name"].lower() for d in getdist()]
     all_plugins = res.Data().raw_plugins
     all_plugins_paged = res.list_paginate(all_plugins, PAGESIZE)
     cur_plugins_paged = all_plugins_paged
@@ -595,7 +623,7 @@ def plugin_store():
         enabled = [a for a in _enabled]
 
         for n, d in enumerate(curpage):
-            pluginvars_i[n].set("卸载" if d["project_link"] in distnames else "安装")
+            pluginvars_i[n].set("卸载" if d["project_link"] in curdistnames else "安装")
             pluginvars_e[n].set("禁用" if d["module_name"] in enabled else "启用")
 
     def getnenabledstate(n: int):
@@ -614,10 +642,6 @@ def plugin_store():
         pageinfo_cpage.set(1)
         pageinfo_mpage = len(cur_plugins_paged)
         subw[3][2].base["values"] = list(range(1, pageinfo_mpage + 1))
-
-    def upddists():
-        nonlocal distnames
-        distnames = [d.metadata["name"].lower() for d in getdist()]
 
     def plugin_context(pl):
         return (
@@ -761,7 +785,13 @@ def plugin_store():
         subw[1] /= (
             (
                 W(tk.LabelFrame, text=_getpluginextendedname(pl), fg="green" if pl["is_official"] else "black", font=font10) * Gridder(column=n & 1, row=n // 2, sticky="w") / (
-                    W(tk.Label, text=pl["desc"], font=font10, width=LABEL_NCH, height=4, wraplength=LABEL_NCH * LABEL_NCH_PX_FACTOR, justify="left") * Packer(anchor="w", expand=True, fill="x", padx=5, pady=5, side="left"),
+                    W(tk.Frame) * Packer(anchor="w", expand=True, fill="x", side="left") / (
+                        W(tk.Label, text=pl["desc"], font=font10, width=LABEL_NCH, height=4, wraplength=LABEL_NCH * LABEL_NCH_PX_FACTOR, justify="left") * Packer(anchor="w", expand=True, fill="x", padx=3, pady=3, side="top"),
+                        W(tk.Frame) * Packer(anchor="w", expand=True, fill="x", padx=3, pady=3, side="top") / (
+                            (W(tk.Label, text=tag["label"], bg=tag["color"], fg=bg2fg(tag["color"]), font=mono10) * Packer(anchor="w", padx=2, side="left"))
+                            for tag in pl["tags"]
+                        )
+                    ),
                     W(tk.Frame) * Packer(anchor="w", side="left") / (
                         W(tk.Button, text="主页", font=font10, command=partial(exops.system_open, pl["homepage"])) * Packer(anchor="w", expand=True, fill="x", side="top"),
                         W(tk.Button, textvariable=pluginvars_e[n], command=partial(perform_enable, n), state=getnenabledstate(n), font=font10) * Packer(anchor="w", expand=True, fill="x", side="top"),
