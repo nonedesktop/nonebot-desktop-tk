@@ -851,7 +851,7 @@ def app_help():
 
     # W.I.P.
     nb = subw.add_widget(ttk.Notebook)
-    pg_home = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
+    pg_home = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
     pg_home.text = (
         "欢迎使用 NoneBot Desktop 应用程序。\n\n"
         "本程序旨在减少使用 NoneBot2 时命令行的使用。\n\n"
@@ -861,7 +861,7 @@ def app_help():
         "提示：尖括号 <> 包裹的内容表明其为外部应用程序；\n"
         "提示：双左引号 `` 包裹的内容表示一个路径（统一使用 Unix 格式）。"
     )
-    pg_create = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
+    pg_create = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
     pg_create.text = (
         "本页介绍了如何使用本程序创建新项目。\n\n"
         "在主界面点击 [项目]菜单 -> [新建项目] 进入创建项目页面。\n\n"
@@ -878,7 +878,7 @@ def app_help():
         f"{PYPI_INDEX_NOTICE}\n\n"
         "创建完成后会自动进入新创建的项目目录。"
     )
-    pg_openrun = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
+    pg_openrun = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
     pg_openrun.text = (
         "本页介绍了如何使用本程序打开并运行已有的项目。\n\n"
         "在主界面点击 [项目]菜单 -> [打开项目] 选择你的项目目录 或 直接将路径粘贴至主界面的[输入框]。\n"
@@ -889,7 +889,7 @@ def app_help():
         "<gnome-terminal>, <konsole>, <xfce4-terminal>, <xterm>, <st> 中查找可用的终端模拟器。\n"
         "提示：运行结束后窗口不会直接关闭，因此不必担心无法查看程序输出。"
     )
-    pg_editenv = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
+    pg_editenv = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
     pg_editenv.text = (
         "本页介绍了如何使用本程序编辑项目的配置文件。\n\n"
         "注意：本页中的配置文件均指项目文件夹中的 DotEnv 文件（所有以 `.env` 开头的配置文件）。\n"
@@ -904,10 +904,22 @@ def app_help():
         "注意：只有在点击[保存]按钮时更改才会被写入到文件，直接关闭窗口或切换至其他配置文件均会丢失当前更改，"
         "本程序*不会*试图通过任何提示阻止这种行为。"
     )
+    pg_drvmgr = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
+    pg_drvmgr.text = (
+        "本页介绍了如何使用本程序管理项目使用的驱动器。\n\n"
+        "注意：出于一些原因，本程序目前*没有*实现驱动器的卸载功能。\n\n"
+    )
+    pg_adpmgr = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
+    pg_adpmgr.text = (
+        "本页介绍了如何使用本程序管理项目使用的适配器。\n\n"
+        ""
+    )
     nb.base.add(pg_home.base, text="主页", padding=(2, 2))  # type: ignore
     nb.base.add(pg_create.base, text="新建项目", padding=(2, 2))  # type: ignore
     nb.base.add(pg_openrun.base, text="打开与启动项目", padding=(2, 2))  # type: ignore
     nb.base.add(pg_editenv.base, text="编辑配置文件", padding=(2, 2))  # type: ignore
+    nb.base.add(pg_drvmgr.base, text="管理驱动器", padding=(2, 2))  # type: ignore
+    nb.base.add(pg_adpmgr.base, text="管理适配器", padding=(2, 2))  # type: ignore
     nb.pack(anchor="nw", expand=True, fill="both")
 
 
