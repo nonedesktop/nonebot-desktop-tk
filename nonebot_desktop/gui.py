@@ -128,6 +128,9 @@ def create_project():
         elif targetpath.is_file():  # not dir
             subw[0][6].disabled = True
             messagebox.showerror("错误", "目标不能为文件", master=subw.base)
+        elif targetpath.stem == "nonebot":  # reserved name
+            subw[0][6].disabled = True
+            messagebox.showerror("错误", "目标目录不能使用保留名", master=subw.base)
         else:
             subw[0][6].disabled = False
 
@@ -169,11 +172,18 @@ def create_project():
         # print([x.get() for x in drivervars])
         # print([x.get() for x in adaptervars])
         # print(devplugvar.get(), venvvar.get())
+        drivs = [d for d, b in zip(res.Data().drivers, drivervars) if b.get()]
+        adaps = [a for a, b in zip(res.Data().adapters, adaptervars) if b.get()]
+        if not drivs:
+            messagebox.showerror("错误", "NoneBot2 项目需要*至少一个*驱动器才能正常工作！", master=subw.base)
+            return
+        if not adaps:
+            messagebox.showerror("错误", "NoneBot2 项目需要*至少一个*适配器才能正常工作！", master=subw.base)
+            return
         subw[0][6].text = "正在创建项目……"
         subw[0][6].disabled = True
         exops.create(
-            mkwd.get(), [d for d, b in zip(res.Data().drivers, drivervars) if b.get()],
-            [a for a, b in zip(res.Data().adapters, adaptervars) if b.get()],
+            mkwd.get(), drivs, adaps,
             devplugvar.get(), venvvar.get(), tmpindex.get()
         )
         cwd.set(mkwd.get())
@@ -821,44 +831,83 @@ def app_help():
     subw = win.sub_window()
     subw.title = "NoneBot Desktop - 使用手册"
 
+    # Some text
+    DRIVERS_NOTICE = (
+        "注意：NoneBot2 项目需要*至少一个*驱动器才能正常工作！\n"
+        "提示：[None]\u00a0驱动器事实上相当于一个“空”驱动器，在不需要进行外部交互"
+        "（如仅使用下面的\u00a0[Console]\u00a0适配器）时可以提供占位。"
+    )
+    ADAPTERS_NOTICE = (
+        "注意：NoneBot2 项目需要*至少一个*适配器才能正常工作！\n"
+        "提示：[OneBot V11] 与 [OneBot V12] 是两套不同的协议，它们互不兼容！\n"
+        "提示：如果要与 <go-cqhttp> 配合使用，应选择 [OneBot V11] 适配器。\n"
+        "提示：[Console] 适配器很适合做一些简单的测试。"
+    )
+    PYPI_INDEX_NOTICE = (
+        "[自定义下载源]可以选择从不同的镜像站下载需要的程序包，一般可以加快下载速度。\n"
+        "注意：[https://pypi.org/simple] 是官方的下载源，更新及时但下载速度慢。\n"
+        "注意：无法保证使用时镜像源是否已同步最新的程序包，如果下载失败请更换不同的下载源。"
+    )
+
     # W.I.P.
     nb = subw.add_widget(ttk.Notebook)
-    pg_home = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
+    pg_home = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
     pg_home.text = (
         "欢迎使用 NoneBot Desktop 应用程序。\n\n"
         "本程序旨在减少使用 NoneBot2 时命令行的使用。\n\n"
         "这里包含了本程序的一些功能用法。\n"
         "进入其它标签页查看更多。\n\n"
-        "提示：方括号 [] 包裹的内容与实际界面的控件文本相对应；\n"
+        "提示：方括号 [] 包裹的内容与实际界面中的控件/文本相对应；\n"
         "提示：尖括号 <> 包裹的内容表明其为外部应用程序；\n"
         "提示：双左引号 `` 包裹的内容表示一个路径（统一使用 Unix 格式）。"
     )
-    pg_create = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
+    pg_create = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
     pg_create.text = (
         "本页介绍了如何使用本程序创建新项目。\n\n"
         "在主界面点击 [项目]菜单 -> [新建项目] 进入创建项目页面。\n\n"
         "在[项目目录]一栏 通过[浏览]选择一个目录 或 直接将路径粘贴至[输入框] 用于创建项目。\n"
         "注意：项目目录*必须*是一个空目录（可以不存在），且避免使用保留名（如\u00a0nonebot\u00a0等）作为项目目录。\n\n"
         "在[驱动器]一栏选择你需要的驱动器（通常是 [FastAPI]）。\n"
-        "注意：NoneBot2 项目需要*至少一个*驱动器才能正常工作！\n"
-        "提示：[None]\u00a0驱动器事实上相当于一个“空”驱动器，在不需要进行外部交互（如仅使用下面的\u00a0[Console]\u00a0适配器）"
-        "时可以提供占位。\n\n"
+        f"{DRIVERS_NOTICE}\n\n"
         "适配器用于与外界进行特定协议的数据交换。\n"
         "在[适配器]一栏选择你需要的适配器。\n"
-        "注意：NoneBot2 项目需要*至少一个*适配器才能正常工作！\n"
-        "提示：[OneBot V11] 与 [OneBot V12] 是两套不同的协议，它们互不兼容！\n"
-        "提示：如果要与 <go-cqhttp> 配合使用，应选择 [OneBot V11] 适配器。\n"
-        "提示：[Console] 适配器很适合做一些简单的测试。\n\n"
-        "如果需要使用无法从插件商店获取的插件（如自编插件、从源码下载的插件等），请勾选[预留配置用于开发插件]选项，"
-        "然后将这些插件正确放入 `src/plugins` 下。\n\n"
+        f"{ADAPTERS_NOTICE}\n\n"
+        "如果需要使用无法从插件商店获取的插件（如自编插件、从源码下载的插件等），请勾选"
+        "[预留配置用于开发插件]选项，然后将这些插件正确放入 `src/plugins` 下。\n\n"
         "[创建虚拟环境]可以有效避免因系统 Python 环境混乱造成的一系列问题，建议开启。\n\n"
-        "[自定义下载源]可以选择从不同的镜像站下载需要的程序包，一般可以加快下载速度。\n"
-        "注意：[https://pypi.org/simple] 是官方的下载源，更新及时但下载速度慢。\n"
-        "注意：无法保证使用时镜像源是否已同步最新的程序包，如果下载失败请更换不同的下载源。\n\n"
+        f"{PYPI_INDEX_NOTICE}\n\n"
         "创建完成后会自动进入新创建的项目目录。"
+    )
+    pg_openrun = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
+    pg_openrun.text = (
+        "本页介绍了如何使用本程序打开并运行已有的项目。\n\n"
+        "在主界面点击 [项目]菜单 -> [打开项目] 选择你的项目目录 或 直接将路径粘贴至主界面的[输入框]。\n"
+        "如果项目目录正确，主界面的[启动]按钮等功能将全部可用。\n"
+        "提示：本程序只支持识别有 `pyproject.toml` 或 `bot.py` 的目录作为项目目录。\n\n"
+        "正确打开项目目录后，点击 主界面上的[启动] 或 [项目]菜单 -> [启动项目] 来运行项目。\n"
+        "提示：项目会在一个新的命令行窗口中运行，Windows 上仅支持使用 <cmd.exe>，Linux 上会自动从 "
+        "<gnome-terminal>, <konsole>, <xfce4-terminal>, <xterm>, <st> 中查找可用的终端模拟器。\n"
+        "提示：运行结束后窗口不会直接关闭，因此不必担心无法查看程序输出。"
+    )
+    pg_editenv = nb.add_widget(tk.Label, justify="left", font=font10, width=75, wraplength=600)
+    pg_editenv.text = (
+        "本页介绍了如何使用本程序编辑项目的配置文件。\n\n"
+        "注意：本页中的配置文件均指项目文件夹中的 DotEnv 文件（所有以 `.env` 开头的配置文件）。\n"
+        "注意：部分插件并不使用这些配置文件，实际使用时请先查看相关插件文档。\n\n"
+        "在主界面点击 [配置]菜单 -> [配置文件编辑器] 进入配置文件编辑页面。\n\n"
+        "在[可用配置文件]一栏的[下拉框]中选择需要编辑的配置文件，选择后将自动打开该文件。\n\n"
+        "[配置项]一栏列出了当前选中的配置文件中所有的配置项（注释在读取和保存时会被忽略）。\n"
+        "每个配置项等号左侧是该配置项的名称（不区分大小写），等号右侧是该配置项的字面值。\n"
+        "如果要添加一个新的配置项，点击下方的[新建配置项]按钮，然后自行填写新配置项的名称和值即可。\n"
+        "本程序在保存时会自动移除空的配置项，因此如果要删除某个配置项，只需要将其名称或字面值清空即可。\n"
+        "编辑完成后，点击[保存]按钮将新的配置写入文件。\n"
+        "注意：只有在点击[保存]按钮时更改才会被写入到文件，直接关闭窗口或切换至其他配置文件均会丢失当前更改，"
+        "本程序*不会*试图通过任何提示阻止这种行为。"
     )
     nb.base.add(pg_home.base, text="主页", padding=(2, 2))  # type: ignore
     nb.base.add(pg_create.base, text="新建项目", padding=(2, 2))  # type: ignore
+    nb.base.add(pg_openrun.base, text="打开与启动项目", padding=(2, 2))  # type: ignore
+    nb.base.add(pg_editenv.base, text="编辑配置文件", padding=(2, 2))  # type: ignore
     nb.pack(anchor="nw", expand=True, fill="both")
 
 

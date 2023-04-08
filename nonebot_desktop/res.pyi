@@ -78,7 +78,7 @@ class Data:
 
     drivers: List[Driver]
     adapters: List[Adapter]
-    plugins: List[Plugin]
+    # plugins: List[Plugin]
     raw_plugins: List[RawPlugin]
 
 

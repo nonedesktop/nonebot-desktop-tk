@@ -116,7 +116,7 @@ class Data:
             cls._SINGLETON = object.__new__(cls)
             cls.drivers = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("driver"))
             cls.adapters = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("adapter"))
-            cls.plugins = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("plugin"))
+            # cls.plugins = BackgroundObject(asyncio.run, NBCLI().handlers.load_module_data("plugin"))
             cls.raw_plugins = BackgroundObject(load_module_data_raw, "plugins")
         return cls._SINGLETON
 
