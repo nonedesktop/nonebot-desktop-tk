@@ -27,6 +27,7 @@ t1_2 = time.perf_counter()
 print(f"[GUI] Import this module: {t1_2 - t1_1:.3f}s")
 
 from tkreform import Packer, Window
+from tkreform.base import Application
 from tkreform.declarative import M, W, Gridder, MenuBinder
 from tkreform.menu import MenuCascade, MenuCommand, MenuSeparator
 from tkreform.events import LMB, X2
@@ -98,103 +99,103 @@ def bg2fg(color: str):
     # 0.2126 × R + 0.7152 × G + 0.0722 × B > 0.5
     c_bgr: List[int] = []
     for _ in range(3):
-        c_bgr.append(0xff if (c_int & (0xff) <= 0x7f) else 0)
+        c_bgr.append(c_int & 0xff)
         c_int >>= 8
     b, g, r = (x / 255 for x in c_bgr)
-    return "#{0:02x}{0:02x}{0:02x}".format(0xff * int(0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5))
+    return "#{0:02x}{0:02x}{0:02x}".format(0xff * int(0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5))
 
 
-def create_project():
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 新建项目"
-    subw.base.grab_set()
+class CreateProject(Application):
+    def setup(self) -> None:
+        self.win.title = "NoneBot Desktop - 新建项目"
+        self.win.base.grab_set()
+        self.create_target = StringVar()
+        self.driver_select_state = [BooleanVar(value=d.name == "FastAPI") for d in res.Data().drivers]
+        self.adapter_select_state = [BooleanVar(value=False) for _ in res.Data().adapters]
+        self.dev_mode = BooleanVar(value=False)
+        self.use_venv = BooleanVar(value=True)
 
-    mkwd = StringVar(value="")
-    drivervars = [BooleanVar(value=d.name == "FastAPI") for d in res.Data().drivers]
-    adaptervars = [BooleanVar(value=False) for _ in res.Data().adapters]
-    devplugvar, venvvar = BooleanVar(value=False), BooleanVar(value=True)
+        self.win /= (
+            W(tk.Frame) * Packer(fill="x", expand=True) / (
+                W(tk.Label, text="项目目录：", font=font10) * Packer(side="left"),
+                W(tk.Entry, textvariable=self.create_target, font=font10) * Packer(side="left", expand=True),
+                W(tk.Button, text="浏览……", font=font10, command=self.ct_browse) * Packer(side="left")
+            ),
+            W(tk.LabelFrame, text="驱动器", font=font10) * Packer(fill="x", expand=True) / (
+                W(tk.Checkbutton, text=f"{dr.name} ({dr.desc})", variable=dv, font=font10) * Packer(side="top", anchor="w")
+                for dr, dv in zip(res.Data().drivers, self.driver_select_state)
+            ),
+            W(tk.LabelFrame, text="适配器", font=font10) * Packer(fill="x", expand=True) / (
+                W(tk.Checkbutton, text=f"{ad.name} ({ad.desc})", variable=av, font=font10) * Packer(side="top", anchor="w")
+                for ad, av in zip(res.Data().adapters, self.adapter_select_state)
+            ),
+            W(tk.Checkbutton, text="预留配置用于开发插件（将会创建 src/plugins）", variable=self.dev_mode, font=font10) * Packer(fill="x", expand=True, anchor="w"),
+            W(tk.Checkbutton, text="创建虚拟环境（位于 .venv，用于隔离环境）", variable=self.use_venv, font=font10) * Packer(fill="x", expand=True, anchor="w"),
+            W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(fill="x", expand=True) / (
+                W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10, width=50) * Packer(side="left", fill="x", expand=True),
+            ),
+            W(tk.Frame) * Packer(fill="x", expand=True)
+        )
 
-    def mkwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
-        targetpath = Path(mkwd.get())
+        self.create_btn = self.win[6].add_widget(tk.Button, text="创建", font=font10)
+        self.create_btn *= Packer(side="right")
+        self.create_btn.disabled = True
+        self.create_btn.callback(lambda: Thread(target=self.perform_create).start())
+
+        self.create_target.trace_add("write", self.ct_checker)
+
+    @property
+    def ct_str(self) -> str:
+        return self.create_target.get()
+    
+    @ct_str.setter
+    def ct_str(self, val: str) -> None:
+        self.create_target.set(val)
+
+    @property
+    def ct_path(self) -> Path:
+        return Path(self.ct_str)
+
+    def ct_checker(self, *_):
         # For valid target:
         # - target is a path
         # - target does not exist or is empty dir
-        if not mkwd.get():  # empty path
-            subw[0][6].disabled = True
-            messagebox.showerror("错误", "路径不能为空", master=subw.base)
-        elif targetpath.is_dir() and tuple(targetpath.iterdir()):  # non-empty dir
-            subw[0][6].disabled = True
-            messagebox.showerror("错误", "目标目录不能非空", master=subw.base)
-        elif targetpath.is_file():  # not dir
-            subw[0][6].disabled = True
-            messagebox.showerror("错误", "目标不能为文件", master=subw.base)
-        elif targetpath.stem == "nonebot":  # reserved name
-            subw[0][6].disabled = True
-            messagebox.showerror("错误", "目标目录不能使用保留名", master=subw.base)
+        _state = True
+        if not self.ct_str:  # empty path
+            messagebox.showerror("错误", "路径不能为空", master=self.win.base)
+        elif self.ct_path.is_dir() and tuple(self.ct_path.iterdir()):  # non-empty dir
+            messagebox.showerror("错误", "目标目录不能非空", master=self.win.base)
+        elif self.ct_path.is_file():  # not dir
+            messagebox.showerror("错误", "目标不能为文件", master=self.win.base)
+        elif self.ct_path.stem == "nonebot":  # reserved name
+            messagebox.showerror("错误", "目标目录不能使用保留名", master=self.win.base)
         else:
-            subw[0][6].disabled = False
+            _state = False
+        self.create_btn.disabled = _state
 
-    mkwd.trace_add("write", mkwd_updator)
+    def ct_browse(self):
+        self.ct_str = filedialog.askdirectory(parent=self.win.base, title="选择项目目录")
 
-    subw /= (
-        W(tk.Frame) * Gridder() / (
-            W(tk.Frame) * Gridder(column=0, row=0) / (
-                W(tk.Label, text="项目目录：", font=font10) * Packer(side="left"),
-                W(tk.Entry, textvariable=mkwd, font=font10) * Packer(side="left", expand=True),
-                W(tk.Button, text="浏览……", font=font10) * Packer(side="left")
-            ),
-            W(tk.LabelFrame, text="驱动器", font=font10) * Gridder(column=0, sticky="w") / (
-                W(tk.Checkbutton, text=f"{dr.name} ({dr.desc})", variable=dv, font=font10) * Packer(side="top", anchor="w")
-                for dr, dv in zip(res.Data().drivers, drivervars)
-            ),
-            W(tk.LabelFrame, text="适配器", font=font10) * Gridder(column=0, sticky="w") / (
-                W(tk.Checkbutton, text=f"{ad.name} ({ad.desc})", variable=av, font=font10) * Packer(side="top", anchor="w")
-                for ad, av in zip(res.Data().adapters, adaptervars)
-            ),
-            W(tk.Checkbutton, text="预留配置用于开发插件（将会创建 src/plugins）", variable=devplugvar, font=font10) * Gridder(column=0, sticky="w"),
-            W(tk.Checkbutton, text="创建虚拟环境（位于 .venv，用于隔离环境）", variable=venvvar, font=font10) * Gridder(column=0, sticky="w"),
-            W(tk.LabelFrame, text="自定义下载源", font=font10) * Gridder(column=0, sticky="w") / (
-                W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10, width=50) * Packer(side="left", fill="x", expand=True),
-            ),
-            W(tk.Button, text="创建", font=font10) * Gridder(column=0, sticky="e")
-        ),
-    )
-
-    @subw[0][0][2].callback
-    def finddir():
-        mkwd.set(filedialog.askdirectory(parent=subw.base, title="选择项目目录"))
-
-    # subw[0][1][1].base.select()  # type: ignore
-    # subw[0][4].base.select()  # type: ignore
-    subw[0][6].disabled = True
-
-    def create():
-        # print([x.get() for x in drivervars])
-        # print([x.get() for x in adaptervars])
-        # print(devplugvar.get(), venvvar.get())
-        drivs = [d for d, b in zip(res.Data().drivers, drivervars) if b.get()]
-        adaps = [a for a, b in zip(res.Data().adapters, adaptervars) if b.get()]
+    def perform_create(self):
+        drivs = [d for d, b in zip(res.Data().drivers, self.driver_select_state) if b.get()]
+        adaps = [a for a, b in zip(res.Data().adapters, self.adapter_select_state) if b.get()]
         if not drivs:
-            messagebox.showerror("错误", "NoneBot2 项目需要*至少一个*驱动器才能正常工作！", master=subw.base)
+            messagebox.showerror("错误", "NoneBot2 项目需要*至少一个*驱动器才能正常工作！", master=self.win.base)
             return
         if not adaps:
-            messagebox.showerror("错误", "NoneBot2 项目需要*至少一个*适配器才能正常工作！", master=subw.base)
+            messagebox.showerror("错误", "NoneBot2 项目需要*至少一个*适配器才能正常工作！", master=self.win.base)
             return
-        subw[0][6].text = "正在创建项目……"
-        subw[0][6].disabled = True
+        self.create_btn.text = "正在创建项目……"
+        self.create_btn.disabled = True
         exops.create(
-            mkwd.get(), drivs, adaps,
-            devplugvar.get(), venvvar.get(), tmpindex.get()
+            self.ct_str, drivs, adaps, self.dev_mode.get(), self.use_venv.get(), tmpindex.get()
         )
-        cwd.set(mkwd.get())
+        cwd.set(self.ct_str)
         try:
-            subw.destroy()
+            self.win.destroy()
         except TclError:
             pass
         messagebox.showinfo(title="项目创建完成", message="项目创建成功，已自动进入该项目。", master=win.base)
-
-    cth = Thread(target=create)
-    subw[0][6].callback(cth.start)
 
 
 def drvmgr():
@@ -949,7 +950,7 @@ print(f"[GUI] Init Sub Functions: {t3 - t2:.3f}s")
 win /= (
     W(tk.Menu) * MenuBinder(win) / (
         M(MenuCascade(label="项目", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="新建项目", font=font10, command=create_project),
+            MenuCommand(label="新建项目", font=font10, command=lambda: CreateProject(win.sub_window())),
             MenuCommand(label="打开项目", font=font10, command=open_project),
             MenuCommand(label="启动项目", font=font10, command=start),
             MenuSeparator(),
