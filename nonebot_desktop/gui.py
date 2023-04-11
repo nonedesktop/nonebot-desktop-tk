@@ -3,13 +3,12 @@ import time
 t0 = time.perf_counter()
 
 from functools import partial
-from glob import glob
 import os
 from pathlib import Path
 from subprocess import Popen
 import sys
 from threading import Thread, Timer
-from typing import Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 t1 = time.perf_counter()
 print(f"[GUI] Import base: {t1 - t0:.3f}s")
@@ -21,14 +20,19 @@ from tkinter import ttk
 t1_1 = time.perf_counter()
 print(f"[GUI] Import tkinter: {t1_1 - t1:.3f}s")
 
-from nonebot_desktop import res, exops
+from nonebot_desktop_wing import (
+    PYPI_MIRRORS, meta, create, rrggbb_bg2fg, getdist, find_python,
+    recursive_find_env_config, recursive_update_env_config, molecules,
+    exec_new_win, open_new_win, system_open, get_toml_config, lazylib,
+    get_builtin_plugins
+)
 
 t1_2 = time.perf_counter()
 print(f"[GUI] Import this module: {t1_2 - t1_1:.3f}s")
 
-from tkreform import Packer, Window
+from tkreform import Packer
 from tkreform.base import Application
-from tkreform.declarative import M, W, Gridder, MenuBinder
+from tkreform.declarative import M, W, Gridder, MenuBinder, NotebookAdder
 from tkreform.menu import MenuCascade, MenuCommand, MenuSeparator
 from tkreform.events import LMB, X2
 from dotenv.main import DotEnv
@@ -36,108 +40,205 @@ from dotenv.main import DotEnv
 t2 = time.perf_counter()
 print(f"[GUI] Import rest modules: {t2 - t1_2:.3f}s")
 
-Thread(target=res.Data, daemon=True).start()
+if TYPE_CHECKING:
+    from importlib.metadata import Distribution
 
 font10 = ("Microsoft Yahei UI", 10)
 mono10 = ("Consolas", 10)
 
-win = Window(tk.Tk())
 
-win.title = "NoneBot Desktop"
-win.size = 452, 80
-win.resizable = False
+class Context:
+    def __init__(self, main) -> None:
+        self.main = main
+        self.cwd = StringVar(value="[点击“项目”菜单新建或打开项目]")
+        self.tmpindex = StringVar()
+        self.curproc: Optional[Popen[bytes]] = None
+        self.curdists: List["Distribution"] = []
+        self.cwd.trace_add("write", self.cwd_updator)
 
-cwd = StringVar(value="[点击“项目”菜单新建或打开项目]")
-tmpindex = StringVar()
-curproc: Optional[Popen[bytes]] = None
-curdistnames: List[str] = []
+    @property
+    def cwd_str(self) -> str:
+        return self.cwd.get()
+
+    @cwd_str.setter
+    def cwd_str(self, dir: str) -> None:
+        self.cwd.set(dir)
+
+    @property
+    def cwd_path(self) -> Path:
+        return Path(self.cwd_str)
+
+    @property
+    def tmp_index(self) -> str:
+        return self.tmpindex.get()
+
+    def upddists(self) -> None:
+        self.curdists = list(getdist(self.cwd_str))
+        print("[upddists] Updated current dists")
+
+    @property
+    def curdistnames(self) -> List[str]:
+        return [d.metadata["name"].lower() for d in self.curdists]
+
+    @property
+    def cwd_valid(self) -> bool:
+        return (
+            self.cwd_path.is_dir()
+            and (
+                (self.cwd_path / "pyproject.toml").is_file()
+                or (self.cwd_path / "bot.py").is_file()
+            )
+        )
+
+    def cwd_updator(self, *_) -> None:
+        valid = self.cwd_valid
+        self.main.win[1][1].disabled = not valid
+        m: tk.Menu = self.main.win[0].base  # type: ignore
+        for entry in (2, 3, 4):
+            m.entryconfig(entry, state="normal" if valid else "disabled")
+        if valid:
+            Thread(target=self.upddists).start()
+            print(f"[cwd_updator] Current directory is set to {self.cwd_str!r}")
+
+    def check_pyproject_toml(self):
+        if (self.cwd_path / "bot.py").exists():
+            if (self.cwd_path / "pyproject.toml").exists():
+                messagebox.showwarning("警告", "检测到目录下存在 bot.py，其可能不会使用 pyproject.toml 中的配置项。", master=self.main.win.base)
+            else:
+                messagebox.showerror("错误", "当前目录下没有 pyproject.toml，无法修改配置。", master=self.main.win.base)
+                raise Exception("当前目录下没有 pyproject.toml，无法修改配置。")
 
 
-def upddists():
-    global curdistnames
-    curdistnames = [d.metadata["name"].lower() for d in getdist()]
-    print("[upddists] Updated current dists")
+class ApplicationWithContext(Application):
+    def __init__(self, base, context: Context) -> None:
+        self.context = context
+        super().__init__(base)
 
 
-def cwd_updator(varname: str = "", _unknown: str = "", op: str = ""):
-    fp = Path(cwd.get())
-    win[1][1].disabled = not fp.is_dir() or not ((fp / "pyproject.toml").is_file() or (fp / "bot.py").is_file())
-    m: tk.Menu = win[0].base  # type: ignore
-    w = list(m.children.values())[0]
-    for entry in (2, 3, 4):
-        m.entryconfig(entry, state="disabled" if win[1][1].disabled else "normal")
-    if win[1][1].disabled:
-        return
-    Thread(target=upddists).start()
-    print(f"[cwd_updator] Current directory is set to {cwd.get()!r}")
+class MainApp(Application):
+    def setup(self) -> None:
+        self.win.title = "NoneBot Desktop"
+        self.win.size = 452, 80
+        self.win.resizable = False
+
+        self.context = Context(self)
+
+        self.win /= (
+            W(tk.Menu) * MenuBinder(self.win) / (
+                M(MenuCascade(label="项目", font=font10), tearoff=False) * MenuBinder() / (
+                    MenuCommand(label="新建项目", font=font10, command=lambda: CreateProject(self.win.sub_window(), self.context)),
+                    MenuCommand(label="打开项目", font=font10, command=self.open_project),
+                    MenuCommand(label="启动项目", font=font10, command=self.start),
+                    MenuSeparator(),
+                    MenuCommand(label="打开项目文件夹", font=font10, command=self.open_pdir),
+                    MenuSeparator(),
+                    MenuCommand(label="退出", font=font10, command=self.win.destroy, accelerator="Alt+F4")
+                ),
+                M(MenuCascade(label="配置", font=font10), tearoff=False) * MenuBinder() / (
+                    MenuCommand(label="配置文件编辑器", command=internal_env_edit, font=font10),
+                    MenuSeparator(),
+                    MenuCommand(label="管理驱动器", command=lambda: DriverManager(self.win.sub_window(), self.context), font=font10),
+                    MenuCommand(label="管理适配器", command=lambda: AdapterManager(self.win.sub_window(), self.context), font=font10),
+                    MenuSeparator(),
+                    MenuCommand(label="管理环境", command=enviroman, font=font10)
+                ),
+                M(MenuCascade(label="插件", font=font10), tearoff=False) * MenuBinder() / (
+                    MenuCommand(label="管理内置插件", command=lambda: BuiltinPlugins(self.win.sub_window(), self.context), font=font10),
+                    MenuCommand(label="插件商店", command=plugin_store, font=font10),
+                ),
+                M(MenuCascade(label="高级", font=font10), tearoff=False) * MenuBinder() / (
+                    MenuCommand(label="打开命令行窗口", font=font10, command=lambda: open_new_win(self.context.cwd_path)),
+                    MenuSeparator(),
+                    MenuCommand(label="编辑 pyproject.toml", font=font10, command=lambda: system_open(self.context.cwd_path / "pyproject.toml"))
+                ),
+                M(MenuCascade(label="帮助", font=font10), tearoff=False) * MenuBinder() / (
+                    MenuCommand(label="使用手册", command=lambda: AppHelp(self.win.sub_window()), font=font10),
+                    MenuCommand(label="关于", command=lambda: AppAbout(self.win.sub_window()), font=font10)
+                )
+            ),
+            W(tk.Frame) * Gridder() / (
+                W(tk.Frame) * Gridder() / (
+                    W(tk.Label, text="当前路径：", font=("Microsoft Yahei UI", 12)) * Packer(side="left"),
+                    W(tk.Entry, textvariable=self.context.cwd, font=("Microsoft Yahei UI", 12), width=40) * Packer(side="left", expand=True)
+                ),
+                W(tk.Button, text="启动", command=self.start, font=("Microsoft Yahei UI", 20)) * Gridder(row=1, sticky="w")
+            )
+        )
+
+        self.context.cwd_updator()
+
+    def run(self):
+        self.win.loop()
+
+    def open_project(self):
+        self.context.cwd_str = filedialog.askdirectory(mustexist=True, parent=self.win.base, title="选择项目目录")
+
+    def start(self):
+        if not self.context.cwd_valid:
+            messagebox.showerror("错误", "当前目录不是正确的项目目录。", master=self.win.base)
+            return
+        self.win[1][0][1].disabled = True
+        self.win[1][1].disabled = True
+        curproc, tmp = exec_new_win(
+            f'''"{sys.executable}" -m nb_cli run''',
+            cwd=self.context.cwd_str
+        )
+
+        def _restore():
+            try:
+                while curproc.poll() is None:
+                    pass
+            except Exception as e:
+                messagebox.showerror("错误", f"{e}", master=self.win.base)
+            finally:
+                os.remove(tmp)
+                self.win[1][0][1].disabled = False
+                self.win[1][1].disabled = False
+
+        Thread(target=_restore).start()
+
+    def open_pdir(self):
+        if not self.context.cwd_valid:
+            messagebox.showerror("错误", "当前目录不是正确的项目目录。", master=self.win.base)
+            return
+        system_open(self.context.cwd_str)
 
 
-cwd.trace_add("write", cwd_updator)
-
-
-def getdist():
-    return exops.distributions(*(str(Path(cwd.get()) / si) for si in glob(".venv/**/site-packages", root_dir=cwd.get(), recursive=True)))
-
-
-def check_pyproject_toml(workdir: Path, master):
-    if (workdir / "bot.py").exists():
-        if (workdir / "pyproject.toml").exists():
-            messagebox.showwarning("警告", "检测到目录下存在 bot.py，其可能不会使用 pyproject.toml 中的配置项。", master=master)
-        else:
-            messagebox.showerror("错误", "当前目录下没有 pyproject.toml，无法修改配置。", master=master)
-            raise Exception("当前目录下没有 pyproject.toml，无法修改配置。")
-
-
-def bg2fg(color: str):
-    c_int = int(color[1:], base=16)
-    # c_rsh = (len(color) - 1) // 3
-    # c_msk = 0xf  # 0b00001111
-    # for _ in range(1, c_rsh):
-    #     c_msk = (c_msk << 4) + c_msk
-    #
-    # Formula for choosing color:
-    # 0.2126 × R + 0.7152 × G + 0.0722 × B > 0.5
-    c_bgr: List[int] = []
-    for _ in range(3):
-        c_bgr.append(c_int & 0xff)
-        c_int >>= 8
-    b, g, r = (x / 255 for x in c_bgr)
-    return "#{0:02x}{0:02x}{0:02x}".format(0xff * int(0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5))
-
-
-class CreateProject(Application):
+class CreateProject(ApplicationWithContext):
     def setup(self) -> None:
         self.win.title = "NoneBot Desktop - 新建项目"
         self.win.base.grab_set()
         self.create_target = StringVar()
-        self.driver_select_state = [BooleanVar(value=d.name == "FastAPI") for d in res.Data().drivers]
-        self.adapter_select_state = [BooleanVar(value=False) for _ in res.Data().adapters]
+        self.driver_select_state = [BooleanVar(value=d.name == "FastAPI") for d in meta.drivers]
+        self.adapter_select_state = [BooleanVar(value=False) for _ in meta.adapters]
         self.dev_mode = BooleanVar(value=False)
         self.use_venv = BooleanVar(value=True)
 
         self.win /= (
-            W(tk.Frame) * Packer(fill="x", expand=True) / (
+            W(tk.Frame) * Packer(fill="x", expand=True, padx=2, pady=2) / (
                 W(tk.Label, text="项目目录：", font=font10) * Packer(side="left"),
-                W(tk.Entry, textvariable=self.create_target, font=font10) * Packer(side="left", expand=True),
+                W(tk.Entry, textvariable=self.create_target, font=font10) * Packer(side="left", expand=True, fill="x"),
                 W(tk.Button, text="浏览……", font=font10, command=self.ct_browse) * Packer(side="left")
             ),
             W(tk.LabelFrame, text="驱动器", font=font10) * Packer(fill="x", expand=True) / (
                 W(tk.Checkbutton, text=f"{dr.name} ({dr.desc})", variable=dv, font=font10) * Packer(side="top", anchor="w")
-                for dr, dv in zip(res.Data().drivers, self.driver_select_state)
+                for dr, dv in zip(meta.drivers, self.driver_select_state)
             ),
             W(tk.LabelFrame, text="适配器", font=font10) * Packer(fill="x", expand=True) / (
                 W(tk.Checkbutton, text=f"{ad.name} ({ad.desc})", variable=av, font=font10) * Packer(side="top", anchor="w")
-                for ad, av in zip(res.Data().adapters, self.adapter_select_state)
+                for ad, av in zip(meta.adapters, self.adapter_select_state)
             ),
-            W(tk.Checkbutton, text="预留配置用于开发插件（将会创建 src/plugins）", variable=self.dev_mode, font=font10) * Packer(fill="x", expand=True, anchor="w"),
-            W(tk.Checkbutton, text="创建虚拟环境（位于 .venv，用于隔离环境）", variable=self.use_venv, font=font10) * Packer(fill="x", expand=True, anchor="w"),
+            W(tk.Frame) * Packer(fill="x", expand=True) / (
+                W(tk.Checkbutton, text="预留配置用于开发插件（将会创建 src/plugins）", variable=self.dev_mode, font=font10) * Packer(anchor="w"),
+                W(tk.Checkbutton, text="创建虚拟环境（位于 .venv，用于隔离环境）", variable=self.use_venv, font=font10) * Packer(anchor="w"),
+            ),
             W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(fill="x", expand=True) / (
-                W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10, width=50) * Packer(side="left", fill="x", expand=True),
+                W(ttk.Combobox, textvariable=self.context.tmpindex, value=PYPI_MIRRORS, font=mono10, width=50) * Packer(side="left", fill="x", expand=True),
             ),
             W(tk.Frame) * Packer(fill="x", expand=True)
         )
 
-        self.create_btn = self.win[6].add_widget(tk.Button, text="创建", font=font10)
+        self.create_btn = self.win[5].add_widget(tk.Button, text="创建", font=font10)
         self.create_btn *= Packer(side="right")
         self.create_btn.disabled = True
         self.create_btn.callback(lambda: Thread(target=self.perform_create).start())
@@ -177,8 +278,8 @@ class CreateProject(Application):
         self.ct_str = filedialog.askdirectory(parent=self.win.base, title="选择项目目录")
 
     def perform_create(self):
-        drivs = [d for d, b in zip(res.Data().drivers, self.driver_select_state) if b.get()]
-        adaps = [a for a, b in zip(res.Data().adapters, self.adapter_select_state) if b.get()]
+        drivs = [d for d, b in zip(meta.drivers, self.driver_select_state) if b.get()]
+        adaps = [a for a, b in zip(meta.adapters, self.adapter_select_state) if b.get()]
         if not drivs:
             messagebox.showerror("错误", "NoneBot2 项目需要*至少一个*驱动器才能正常工作！", master=self.win.base)
             return
@@ -187,234 +288,238 @@ class CreateProject(Application):
             return
         self.create_btn.text = "正在创建项目……"
         self.create_btn.disabled = True
-        exops.create(
-            self.ct_str, drivs, adaps, self.dev_mode.get(), self.use_venv.get(), tmpindex.get()
-        )
-        cwd.set(self.ct_str)
+        try:
+            create(
+                self.ct_str, drivs, adaps, self.dev_mode.get(), self.use_venv.get(),
+                self.context.tmp_index, new_win=True
+            )
+        except Exception as e:
+            messagebox.showerror("错误", f"{e}", master=self.win.base)
+            return
+        self.context.cwd_str = self.ct_str
         try:
             self.win.destroy()
         except TclError:
             pass
-        messagebox.showinfo(title="项目创建完成", message="项目创建成功，已自动进入该项目。", master=win.base)
+        messagebox.showinfo(title="项目创建完成", message="项目创建成功，已自动进入该项目。", master=self.context.main.win.base)
 
 
-def drvmgr():
-    driverenvs: List[StringVar] = [StringVar(value="启用") for _ in res.Data().drivers]  # drivers' states (enabled, disabled)
-    drivervars: List[StringVar] = [StringVar(value="安装") for _ in res.Data().drivers]  # drivers' states (installed, not installed)
+class DriverManager(ApplicationWithContext):
+    def setup(self) -> None:
+        self.drv_installed_states = [StringVar(value="安装") for _ in meta.drivers]  # drivers' states (installed, not installed)
+        self.drv_enabled_states = [StringVar(value="启用") for _ in meta.drivers]  # drivers' states (enabled, disabled)
+        self.win.title = "NoneBot Desktop - 管理驱动器"
+        self.win.resizable = False
+        self.win.base.grab_set()
 
-    def update_drivers():
-        _enabled = exops.recursive_find_env_config(cwd.get(), "DRIVER")
+        self.win /= (
+            W(tk.Frame) * Packer(side="top") / (
+                (
+                    W(tk.LabelFrame, text=drv.name, font=font10) * Gridder(column=n & 1, row=n // 2, sticky="nw") / (
+                        W(tk.Label, text=drv.desc, font=font10, width=20, height=3, justify="left") * Packer(anchor="nw", side="top"),
+                        W(tk.Frame) * Packer(anchor="nw", fill="x", side="top", expand=True) / (
+                            W(tk.Button, font=font10, textvariable=self.drv_enabled_states[n], command=partial(self.perform_enable, n)) * Packer(fill="x", side="left", expand=True),
+                            W(tk.Button, font=font10, textvariable=self.drv_installed_states[n], command=partial(self.perform_install, n)) * Packer(fill="x", side="left", expand=True)
+                        )
+                    )
+                ) for n, drv in enumerate(meta.drivers)
+            ),
+            W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
+                W(ttk.Combobox, textvariable=self.context.tmpindex, value=PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
+            )
+        )
+
+        self.driver_st_updator()
+
+    def driver_st_updator(self):
+        _enabled = recursive_find_env_config(self.context.cwd_str, "DRIVER")
         if _enabled is None:
             enabled = []
         else:
             enabled = _enabled.split("+")
 
-        for n, d in enumerate(res.Data().drivers):
-            if d.name.lower() in curdistnames:
-                drivervars[n].set("已安装")
+        for n, d in enumerate(meta.drivers):
+            if d.name.lower() in self.context.curdistnames:
+                self.drv_installed_states[n].set("已安装")
+                self.win[0][n][1][0].disabled = False
+                self.win[0][n][1][1].disabled = True
             elif d.name != "None":
-                drivervars[n].set("安装")
+                self.drv_installed_states[n].set("安装")
+                self.win[0][n][1][0].disabled = True
+                self.win[0][n][1][1].disabled = False
             else:
-                drivervars[n].set("内置")
-            
-            driverenvs[n].set("禁用" if d.module_name in enabled else "启用")
+                self.drv_installed_states[n].set("内置")
+                self.win[0][n][1][0].disabled = False
+                self.win[0][n][1][0].disabled = True
 
-    update_drivers()
+            self.drv_enabled_states[n].set("禁用" if d.module_name in enabled else "启用")
 
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 管理驱动器"
-    subw.resizable = False
-    subw.base.grab_set()
-
-    def getnenabledstate(n: int):
-        return "disabled" if drivervars[n].get() == "安装" else "normal"
-
-    def getninstalledstate(n: int):
-        return "disabled" if drivervars[n].get() == "内置" or drivervars[n].get() == "已安装" else "normal"
-
-    def perform(n: int, op: Literal["enabled", "installed"]):
-        target = res.Data().drivers[n]
-        if op == "enabled":
-            _enabled = exops.recursive_find_env_config(cwd.get(), "DRIVER")
-            if _enabled is None:
-                enabled = []
-            else:
-                enabled = _enabled.split("+")
-
-            if target.module_name in enabled:
-                enabled.remove(target.module_name)
-            else:
-                enabled.append(target.module_name)
-
-            exops.recursive_update_env_config(cwd.get(), "DRIVER", "+".join(enabled))
-
-            upddists()
-            update_drivers()
-            subw[0][n][1][0].base["state"] = getnenabledstate(n)
-            subw[0][n][1][1].base["state"] = getninstalledstate(n)
+    def perform_enable(self, n: int):
+        target = meta.drivers[n]
+        _enabled = recursive_find_env_config(self.context.cwd_str, "DRIVER")
+        if _enabled is None:
+            enabled = []
         else:
-            cfp = Path(cwd.get())
-            subw[0][n][1][1].disabled = True
+            enabled = _enabled.split("+")
 
-            p, tmp = exops.exec_new_win(
-                cfp,
-                f'''"{exops.find_python(cfp)}" -m pip install "{target.project_link}"'''
-            )
+        if target.module_name in enabled:
+            enabled.remove(target.module_name)
+        else:
+            enabled.append(target.module_name)
 
-            def _restore():
-                if p:
-                    while p.poll() is None:
-                        pass
-                    os.remove(tmp)
-                    update_drivers()
-                    subw[0][n][1][0].base["state"] = getnenabledstate(n)
-                    subw[0][n][1][1].base["state"] = getninstalledstate(n)
+        recursive_update_env_config(self.context.cwd_str, "DRIVER", "+".join(enabled))
+        self.context.upddists()
+        self.driver_st_updator()
 
-            Thread(target=_restore).start()
+    def perform_install(self, n: int):
+        target = meta.drivers[n]
+        cfp = self.context.cwd_path
+        self.win[0][n][1][1].disabled = True
 
-    subw /= (
-        W(tk.Frame) * Packer(side="top") / (
-            (
-                W(tk.LabelFrame, text=drv.name, font=font10) * Gridder(column=n & 1, row=n // 2, sticky="nw") / (
-                    W(tk.Label, text=drv.desc, font=font10, width=20, height=3, justify="left") * Packer(anchor="nw", side="top"),
-                    W(tk.Frame) * Packer(anchor="nw", fill="x", side="top", expand=True) / (
-                        W(tk.Button, font=font10, textvariable=driverenvs[n], command=partial(perform, n, "enabled"), state=getnenabledstate(n)) * Packer(fill="x", side="left", expand=True),
-                        W(tk.Button, font=font10, textvariable=drivervars[n], command=partial(perform, n, "installed"), state=getninstalledstate(n)) * Packer(fill="x", side="left", expand=True)
-                    )
-                )
-            ) for n, drv in enumerate(res.Data().drivers)
-        ),
-        W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
-            W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
+        p, tmp = molecules.perform_pip_install(
+            str(find_python(cfp)),
+            target.project_link,
+            index=self.context.tmp_index,
+            new_win=True
         )
-    )
+
+        def _restore():
+            try:
+                while p.poll() is None:
+                    pass
+                self.context.upddists()
+            except Exception as e:
+                messagebox.showerror("错误", f"{e}", master=self.win.base)
+            finally:
+                self.driver_st_updator()
+                os.remove(tmp)
+
+        Thread(target=_restore).start()
 
 
-def adpmgr():
-    check_pyproject_toml(Path(cwd.get()), master=win)
+class AdapterManager(ApplicationWithContext):
+    def setup(self) -> None:
+        self.context.check_pyproject_toml()
+        self.adp_installed_state = [StringVar(value="安装") for _ in meta.adapters]  # adapters' states (installed, not installed)
+        self.adp_enabled_state = [StringVar(value="启用") for _ in meta.adapters]  # adapters' states (enabled, disabled)
+        self.win.title = "NoneBot Desktop - 管理适配器"
+        self.win.resizable = False
+        self.win.base.grab_set()
 
-    adapterenvs: List[StringVar] = [StringVar(value="启用") for _ in res.Data().adapters]  # adapters' states (enabled, disabled)
-    adaptervars: List[StringVar] = [StringVar(value="安装") for _ in res.Data().adapters]  # adapters' states (installed, not installed)
+        self.win /= (
+            W(tk.Frame) * Packer(side="top") / (
+                (
+                    W(tk.LabelFrame, text=adp.name, font=font10) * Gridder(column=n % 3, row=n // 3, sticky="nw") / (
+                        W(tk.Label, text=adp.desc, font=font10, width=40, height=3, justify="left") * Packer(anchor="nw", side="top"),
+                        W(tk.Frame) * Packer(anchor="nw", fill="x", side="top", expand=True) / (
+                            W(tk.Button, font=font10, textvariable=self.adp_enabled_state[n], command=partial(self.perform_enable, n)) * Packer(fill="x", side="left", expand=True),
+                            W(tk.Button, font=font10, textvariable=self.adp_installed_state[n], command=partial(self.perform_install, n)) * Packer(fill="x", side="left", expand=True)
+                        )
+                    )
+                ) for n, adp in enumerate(meta.adapters)
+            ),
+            W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
+                W(ttk.Combobox, textvariable=self.context.tmpindex, value=PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
+            )
+        )
 
-    def update_adapters():
-        conf = exops.get_toml_config(cwd.get())
+        self.adapter_st_updator()
+
+    def adapter_st_updator(self):
+        conf = get_toml_config(self.context.cwd_str)
         if not (data := conf._get_data()):
             raise RuntimeError("Config file not found!")
         table: Dict[str, Any] = data.setdefault("tool", {}).setdefault("nonebot", {})
         _enabled: List[Dict[str, str]] = table.setdefault("adapters", [])
         enabled = [a["module_name"] for a in _enabled]
 
-        for n, d in enumerate(res.Data().adapters):
-            adaptervars[n].set("卸载" if d.project_link in curdistnames else "安装")
-            adapterenvs[n].set("禁用" if d.module_name in enabled else "启用")
+        for n, d in enumerate(meta.adapters):
+            self.adp_installed_state[n].set("卸载" if d.project_link in self.context.curdistnames else "安装")
+            self.win[0][n][1][0].disabled = not d.project_link in self.context.curdistnames
+            self.adp_enabled_state[n].set("禁用" if d.module_name in enabled else "启用")
+            self.win[0][n][1][1].disabled = d.module_name in enabled
 
-    update_adapters()
-
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 管理适配器"
-    subw.resizable = False
-    subw.base.grab_set()
-
-    def getnenabledstate(n: int):
-        return "disabled" if adaptervars[n].get() == "安装" else "normal"
-
-    def getninstalledstate(n: int):
-        return "disabled" if adapterenvs[n].get() == "禁用" else "normal"
-
-    def perform(n: int, op: Literal["enabled", "installed"]):
-        target = res.Data().adapters[n]
-        if op == "enabled":
-            slimtarget = res.NBCLI().config.SimpleInfo.parse_obj(target)
-            conf = exops.get_toml_config(cwd.get())
-            if adapterenvs[n].get() == "禁用":
-                conf.remove_adapter(slimtarget)
-            else:
-                conf.add_adapter(slimtarget)
-
-            update_adapters()
-            subw[0][n][1][0].base["state"] = getnenabledstate(n)
-            subw[0][n][1][1].base["state"] = getninstalledstate(n)
+    def perform_enable(self, n: int):
+        target = meta.adapters[n]
+        slimtarget = lazylib.nb_cli.config.SimpleInfo.parse_obj(target)
+        conf = get_toml_config(self.context.cwd_str)
+        if self.adp_enabled_state[n].get() == "禁用":
+            conf.remove_adapter(slimtarget)
         else:
-            cfp = Path(cwd.get())
-            subw[0][n][1][1].disabled = True
-            pip_op = "install" if adaptervars[n].get() == "安装" else "uninstall"
+            conf.add_adapter(slimtarget)
+        self.adapter_st_updator()
 
-            p, tmp = exops.exec_new_win(
-                cfp,
-                f'''"{exops.find_python(cfp)}" -m pip {pip_op} "{target.project_link}"'''
+    def perform_install(self, n: int):
+        target = meta.adapters[n]
+        cfp = Path(self.context.cwd_str)
+        self.win[0][n][1][1].disabled = True
+
+        p, tmp = (
+            molecules.perform_pip_install(
+                str(find_python(cfp)),
+                target.project_link,
+                index=self.context.tmp_index,
+                new_win=True
+            ) if self.adp_installed_state[n].get() == "安装" else
+            molecules.perform_pip_command(
+                str(find_python(cfp)),
+                "uninstall", target.project_link,
+                new_win=True
             )
-
-            def _restore():
-                if p:
-                    while p.poll() is None:
-                        pass
-                    os.remove(tmp)
-                    upddists()
-                    update_adapters()
-                    subw[0][n][1][0].base["state"] = getnenabledstate(n)
-                    subw[0][n][1][1].base["state"] = getninstalledstate(n)
-
-            Thread(target=_restore).start()
-
-    subw /= (
-        W(tk.Frame) * Packer(side="top") / (
-            (
-                W(tk.LabelFrame, text=adp.name, font=font10) * Gridder(column=n % 3, row=n // 3, sticky="nw") / (
-                    W(tk.Label, text=adp.desc, font=font10, width=40, height=3, justify="left") * Packer(anchor="nw", side="top"),
-                    W(tk.Frame) * Packer(anchor="nw", fill="x", side="top", expand=True) / (
-                        W(tk.Button, font=font10, textvariable=adapterenvs[n], command=partial(perform, n, "enabled"), state=getnenabledstate(n)) * Packer(fill="x", side="left", expand=True),
-                        W(tk.Button, font=font10, textvariable=adaptervars[n], command=partial(perform, n, "installed"), state=getninstalledstate(n)) * Packer(fill="x", side="left", expand=True)
-                    )
-                )
-            ) for n, adp in enumerate(res.Data().adapters)
-        ),
-        W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="top", expand=True) / (
-            W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
         )
-    )
+
+        def _restore():
+            try:
+                while p.poll() is None:
+                    pass
+                self.context.upddists()
+            except Exception as e:
+                messagebox.showerror("错误", f"{e}", master=self.win.base)
+            finally:
+                self.adapter_st_updator()
+                os.remove(tmp)
+
+        Thread(target=_restore).start()
 
 
-def builtin_plugins():
-    check_pyproject_toml(Path(cwd.get()), win.base)
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 管理内置插件"
-    subw.base.grab_set()
+class BuiltinPlugins(ApplicationWithContext):
+    def setup(self) -> None:
+        self.context.check_pyproject_toml()
+        self.win.title = "NoneBot Desktop - 管理内置插件"
+        self.win.base.grab_set()
+        self.builtin_plugins = get_builtin_plugins(str(find_python(self.context.cwd_str)))
+        self.bp_enabled_states = [StringVar(value="启用") for _ in self.builtin_plugins]
 
-    bplugins = res.get_builtin_plugins(str(exops.find_python(Path(cwd.get()))))
-    opstate = [StringVar(value="启用") for _ in bplugins]
+        self.win /= (
+            (
+                W(tk.Frame) * Packer(anchor="nw", fill="x", side="top") / (
+                    W(tk.Label, text=bp, font=font10, justify="left") * Packer(anchor="w", expand=True, fill="x", side="left"),
+                    W(tk.Button, textvariable=self.bp_enabled_states[n], command=partial(self.setnstate, n), font=font10) * Packer(anchor="w", side="left")
+                )
+            ) for n, bp in enumerate(self.builtin_plugins)
+        )
 
-    def updstate():
-        cfg = exops.get_toml_config(cwd.get())
+        self.updstate()
+
+    def updstate(self):
+        cfg = get_toml_config(self.context.cwd_str)
         if not (data := cfg._get_data()):
             raise RuntimeError("Config file not found!")
         table: Dict[str, Any] = data.setdefault("tool", {}).setdefault("nonebot", {})
         plugins: List[str] = table.setdefault("builtin_plugins", [])
-        for n, pl in enumerate(bplugins):
-            if pl in plugins:
-                opstate[n].set("禁用")
-            else:
-                opstate[n].set("启用")
+        for n, pl in enumerate(self.builtin_plugins):
+            self.bp_enabled_states[n].set("禁用" if pl in plugins else "启用")
 
-    updstate()
-
-    def setnstate(n: int):
-        cfg = exops.get_toml_config(cwd.get())
-        if opstate[n].get() == "启用":
-            cfg.add_builtin_plugin(bplugins[n])
+    def setnstate(self, n: int):
+        cfg = get_toml_config(self.context.cwd_str)
+        if self.bp_enabled_states[n].get() == "启用":
+            cfg.add_builtin_plugin(self.builtin_plugins[n])
         else:
-            cfg.remove_builtin_plugin(bplugins[n])
-        updstate()
-
-    subw /= (
-        (
-            W(tk.Frame) * Packer(anchor="nw", fill="x", side="top") / (
-                W(tk.Label, text=bp, font=font10, justify="left") * Packer(anchor="w", expand=True, fill="x", side="left"),
-                W(tk.Button, textvariable=opstate[n], command=partial(setnstate, n), font=font10) * Packer(anchor="w", side="left")
-            )
-        ) for n, bp in enumerate(bplugins)
-    )
+            cfg.remove_builtin_plugin(self.builtin_plugins[n])
+        self.updstate()
 
 
+# TODO: refactor.
 def enviroman():
     subw = win.sub_window()
     subw.title = "NoneBot Desktop - 管理环境"
@@ -426,7 +531,7 @@ def enviroman():
     dists = StringVar()
 
     def update_dists_list():
-        _dists = list(getdist())
+        _dists = list(getdist(self.context.cwd_str))
         if not _dists:
             _dists = list(exops.current_distros())
 
@@ -440,7 +545,7 @@ def enviroman():
     update_dists_list()
 
     def pkgop(op: str):
-        cfp = Path(cwd.get())
+        cfp = Path(self.context.cwd_str)
         subw[0][0][0].disabled = True
         subw[0][1][2][0].disabled = True
         subw[0][1][1][0].disabled = True
@@ -507,44 +612,13 @@ def enviroman():
         _infoupd()
 
 
-def open_project():
-    cwd.set(filedialog.askdirectory(mustexist=True, parent=win.base, title="选择项目目录"))
-
-
-def start():
-    if win[1][1].disabled:
-        messagebox.showerror("错误", "当前目录不是正确的项目目录。", master=win.base)
-        return
-    global curproc
-    pdir = Path(cwd.get())
-    win[1][0][1].disabled = True
-    win[1][1].disabled = True
-    curproc, tmp = exops.exec_new_win(pdir, f'''"{sys.executable}" -m nb_cli run''')
-
-    def _restore():
-        if curproc:
-            while curproc.poll() is None:
-                pass
-            win[1][0][1].disabled = False
-            win[1][1].disabled = False
-            os.remove(tmp)
-
-    Thread(target=_restore).start()
-
-
-def open_pdir():
-    if win[1][1].disabled:
-        messagebox.showerror("错误", "当前目录不是正确的项目目录。", master=win.base)
-        return
-    exops.system_open(cwd.get())
-
-
+# TODO: refactor.
 def internal_env_edit():
     subw = win.sub_window()
     subw.title = "NoneBot Desktop - 配置文件编辑器"
     subw.base.grab_set()
 
-    allenvs = exops.find_env_file(cwd.get())
+    allenvs = exops.find_env_file(self.context.cwd_str)
     envf = StringVar(value="[请选择一个配置文件进行编辑]")
     curenv = DotEnv(envf.get())
     curopts = []
@@ -555,7 +629,7 @@ def internal_env_edit():
         subw[2][1].disabled = invalid
         if not invalid:
             nonlocal curenv, curopts
-            curenv = DotEnv(Path(cwd.get()) / envf.get())
+            curenv = DotEnv(Path(self.context.cwd_str) / envf.get())
             curopts = [(StringVar(value=k), StringVar(value=v)) for k, v in curenv.dict().items() if v is not None]
             subw[1] /= (
                 W(tk.Frame) * Gridder(column=0, sticky="w") / (
@@ -580,7 +654,7 @@ def internal_env_edit():
         _val.pack(side="left")
 
     def save_env():
-        with open(Path(cwd.get()) / envf.get(), "w") as f:
+        with open(Path(self.context.cwd_str) / envf.get(), "w") as f:
             f.writelines(f"{k}={v}\n" for k, v in ((_k.get(), _v.get()) for _k, _v in curopts) if k and v)
 
         def _success():
@@ -605,14 +679,15 @@ def internal_env_edit():
     envf_updator()
 
 
+# TODO: refactor.
 def plugin_store():
-    check_pyproject_toml(Path(cwd.get()), win.base)
+    check_pyproject_toml(Path(self.context.cwd_str), win.base)
     subw = win.sub_window()
     subw.title = "NoneBot Desktop - 插件商店"
     subw.base.grab_set()
 
     PAGESIZE = 8
-    all_plugins = res.Data().raw_plugins
+    all_plugins = meta.raw_plugins
     all_plugins_paged = res.list_paginate(all_plugins, PAGESIZE)
     cur_plugins_paged = all_plugins_paged
     pageinfo_cpage = IntVar(value=1)
@@ -626,7 +701,7 @@ def plugin_store():
         except TclError:
             return
         curpage = cur_plugins_paged[cpage - 1] if cur_plugins_paged else []
-        conf = exops.get_toml_config(cwd.get())
+        conf = exops.get_toml_config(self.context.cwd_str)
         if not (data := conf._get_data()):
             raise RuntimeError("Config file not found!")
         table: Dict[str, Any] = data.setdefault("tool", {}).setdefault("nonebot", {})
@@ -722,7 +797,7 @@ def plugin_store():
             subw[3][i].disabled = True
 
         target = cur_plugins_paged[cpage - 1][n]
-        cfp = Path(cwd.get())
+        cfp = Path(self.context.cwd_str)
         subw[1][n][1][2].disabled = True
         pip_op = "install" if pluginvars_i[n].get() == "安装" else "uninstall"
 
@@ -752,7 +827,7 @@ def plugin_store():
         except TclError:
             return
         target = cur_plugins_paged[cpage - 1][n]["module_name"]
-        conf = exops.get_toml_config(cwd.get())
+        conf = exops.get_toml_config(self.context.cwd_str)
         if pluginvars_e[n].get() == "禁用":
             conf.remove_plugin(target)
         else:
@@ -799,7 +874,7 @@ def plugin_store():
                     W(tk.Frame) * Packer(anchor="w", expand=True, fill="x", side="left") / (
                         W(tk.Label, text=pl["desc"], font=font10, width=LABEL_NCH, height=4, wraplength=LABEL_NCH * LABEL_NCH_PX_FACTOR, justify="left") * Packer(anchor="w", expand=True, fill="x", padx=3, pady=3, side="top"),
                         W(tk.Frame) * Packer(anchor="w", expand=True, fill="x", padx=3, pady=3, side="top") / (
-                            (W(tk.Label, text=tag["label"], bg=tag["color"], fg=bg2fg(tag["color"]), font=mono10) * Packer(anchor="w", padx=2, side="left"))
+                            (W(tk.Label, text=tag["label"], bg=tag["color"], fg=rrggbb_bg2fg(tag["color"]), font=mono10) * Packer(anchor="w", padx=2, side="left"))
                             for tag in pl["tags"]
                         )
                     ),
@@ -828,10 +903,7 @@ def plugin_store():
     update_page()
 
 
-def app_help():
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 使用手册"
-
+class AppHelp(Application):
     # Some text
     DRIVERS_NOTICE = (
         "注意：NoneBot2 项目需要*至少一个*驱动器才能正常工作！\n"
@@ -849,11 +921,7 @@ def app_help():
         "注意：[https://pypi.org/simple] 是官方的下载源，更新及时但下载速度慢。\n"
         "注意：无法保证使用时镜像源是否已同步最新的程序包，如果下载失败请更换不同的下载源。"
     )
-
-    # W.I.P.
-    nb = subw.add_widget(ttk.Notebook)
-    pg_home = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
-    pg_home.text = (
+    HOMEPAGE_T = (
         "欢迎使用 NoneBot Desktop 应用程序。\n\n"
         "本程序旨在减少使用 NoneBot2 时命令行的使用。\n\n"
         "这里包含了本程序的一些功能用法。\n"
@@ -862,8 +930,7 @@ def app_help():
         "提示：尖括号 <> 包裹的内容表明其为外部应用程序；\n"
         "提示：双左引号 `` 包裹的内容表示一个路径（统一使用 Unix 格式）。"
     )
-    pg_create = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
-    pg_create.text = (
+    CREATE_T = (
         "本页介绍了如何使用本程序创建新项目。\n\n"
         "在主界面点击 [项目]菜单 -> [新建项目] 进入创建项目页面。\n\n"
         "在[项目目录]一栏 通过[浏览]选择一个目录 或 直接将路径粘贴至[输入框] 用于创建项目。\n"
@@ -879,8 +946,7 @@ def app_help():
         f"{PYPI_INDEX_NOTICE}\n\n"
         "创建完成后会自动进入新创建的项目目录。"
     )
-    pg_openrun = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
-    pg_openrun.text = (
+    OPENRUN_T = (
         "本页介绍了如何使用本程序打开并运行已有的项目。\n\n"
         "在主界面点击 [项目]菜单 -> [打开项目] 选择你的项目目录 或 直接将路径粘贴至主界面的[输入框]。\n"
         "如果项目目录正确，主界面的[启动]按钮等功能将全部可用。\n"
@@ -890,8 +956,7 @@ def app_help():
         "<gnome-terminal>, <konsole>, <xfce4-terminal>, <xterm>, <st> 中查找可用的终端模拟器。\n"
         "提示：运行结束后窗口不会直接关闭，因此不必担心无法查看程序输出。"
     )
-    pg_editenv = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
-    pg_editenv.text = (
+    EDITENV_T = (
         "本页介绍了如何使用本程序编辑项目的配置文件。\n\n"
         "注意：本页中的配置文件均指项目文件夹中的 DotEnv 文件（所有以 `.env` 开头的配置文件）。\n"
         "注意：部分插件并不使用这些配置文件，实际使用时请先查看相关插件文档。\n\n"
@@ -905,91 +970,56 @@ def app_help():
         "注意：只有在点击[保存]按钮时更改才会被写入到文件，直接关闭窗口或切换至其他配置文件均会丢失当前更改，"
         "本程序*不会*试图通过任何提示阻止这种行为。"
     )
-    pg_drvmgr = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
-    pg_drvmgr.text = (
+    DRVMGR_T = (
         "本页介绍了如何使用本程序管理项目使用的驱动器。\n\n"
         "注意：出于一些原因，本程序目前*没有*实现驱动器的卸载功能。\n\n"
     )
-    pg_adpmgr = nb.add_widget(tk.Label, justify="left", font=font10, wraplength=600)
-    pg_adpmgr.text = (
+    ADPMGR_T = (
         "本页介绍了如何使用本程序管理项目使用的适配器。\n\n"
         ""
     )
-    nb.base.add(pg_home.base, text="主页", padding=(2, 2))  # type: ignore
-    nb.base.add(pg_create.base, text="新建项目", padding=(2, 2))  # type: ignore
-    nb.base.add(pg_openrun.base, text="打开与启动项目", padding=(2, 2))  # type: ignore
-    nb.base.add(pg_editenv.base, text="编辑配置文件", padding=(2, 2))  # type: ignore
-    nb.base.add(pg_drvmgr.base, text="管理驱动器", padding=(2, 2))  # type: ignore
-    nb.base.add(pg_adpmgr.base, text="管理适配器", padding=(2, 2))  # type: ignore
-    nb.pack(anchor="nw", expand=True, fill="both")
+
+    def setup(self):
+        self.win.title = "NoneBot Desktop - 使用手册"
+        name_content = (
+            ("主页", self.HOMEPAGE_T),
+            ("新建项目", self.CREATE_T),
+            ("打开与启动项目", self.OPENRUN_T),
+            ("编辑配置文件", self.EDITENV_T),
+            ("管理驱动器", self.DRVMGR_T),
+            ("管理适配器", self.ADPMGR_T),
+        )
+
+        self.win /= (
+            W(ttk.Notebook) * Packer(anchor="nw", expand=True, fill="both") / (
+                (
+                    W(tk.Label, text=content, justify="left", font=font10, wraplength=600)
+                    * NotebookAdder(text=name, padding=2)
+                ) for name, content in name_content
+            ),
+        )
 
 
-def app_about():
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 关于"
-
-    url = "https://github.com/NCBM/nonebot-desktop-tk"
-    msg = subw.add_widget(tk.Message, width=400, font=font10)
-    msg.text = (
-        "NoneBot Desktop (Tkinter) 1.0.0a1\n"
+class AppAbout(Application):
+    url = "https://github.com/nonedesktop/nonebot-desktop-tk"
+    text = (
+        "NoneBot Desktop (Tkinter) 1.0.0b1\n"
         "(C) 2023 NCBM (Nhanchou Baimin, 南舟白明, worldmozara)\n"
         "该项目使用 MIT 协议开源。\n"
         f"项目主页: {url}"
     )
-    msg.pack(padx=10, pady=10)
 
-    hpg = subw.add_widget(tk.Button, font=font10)
-    hpg.text = "前往项目主页"
-    hpg.command(lambda: exops.system_open(url))
-    hpg.pack(fill="x", expand=True)
+    def setup(self) -> None:
+        self.win.title = "NoneBot Desktop - 关于"
+        self.win /= (
+            W(tk.Label, text=self.text, font=font10, justify="left", wraplength=480) * Packer(padx=10, pady=10),
+            W(tk.Button, text="前往项目主页", font=font10, command=lambda: system_open(self.url)) * Packer(fill="x", expand=True)
+        )
 
 
 t3 = time.perf_counter()
 print(f"[GUI] Init Sub Functions: {t3 - t2:.3f}s")
 
-win /= (
-    W(tk.Menu) * MenuBinder(win) / (
-        M(MenuCascade(label="项目", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="新建项目", font=font10, command=lambda: CreateProject(win.sub_window())),
-            MenuCommand(label="打开项目", font=font10, command=open_project),
-            MenuCommand(label="启动项目", font=font10, command=start),
-            MenuSeparator(),
-            MenuCommand(label="打开项目文件夹", font=font10, command=open_pdir),
-            MenuSeparator(),
-            MenuCommand(label="退出", font=font10, command=win.destroy, accelerator="Alt+F4")
-        ),
-        M(MenuCascade(label="配置", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="配置文件编辑器", command=internal_env_edit, font=font10),
-            MenuSeparator(),
-            MenuCommand(label="管理驱动器", command=drvmgr, font=font10),
-            MenuCommand(label="管理适配器", command=adpmgr, font=font10),
-            MenuSeparator(),
-            MenuCommand(label="管理环境", command=enviroman, font=font10)
-        ),
-        M(MenuCascade(label="插件", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="管理内置插件", command=builtin_plugins, font=font10),
-            MenuCommand(label="插件商店", command=plugin_store, font=font10),
-        ),
-        M(MenuCascade(label="高级", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="打开命令行窗口", font=font10, command=lambda: exops.open_new_win(Path(cwd.get()))),
-            MenuSeparator(),
-            MenuCommand(label="编辑 pyproject.toml", font=font10, command=lambda: exops.system_open(Path(cwd.get()) / "pyproject.toml"))
-        ),
-        M(MenuCascade(label="帮助", font=font10), tearoff=False) * MenuBinder() / (
-            MenuCommand(label="使用手册", command=app_help, font=font10),
-            MenuCommand(label="关于", command=app_about, font=font10)
-        )
-    ),
-    W(tk.Frame) * Gridder() / (
-        W(tk.Frame) * Gridder() / (
-            W(tk.Label, text="当前路径：", font=("Microsoft Yahei UI", 12)) * Packer(side="left"),
-            W(tk.Entry, textvariable=cwd, font=("Microsoft Yahei UI", 12), width=40) * Packer(side="left", expand=True)
-        ),
-        W(tk.Button, text="启动", command=start, font=("Microsoft Yahei UI", 20)) * Gridder(row=1, sticky="w")
-    )
-)
-
-cwd_updator()
 
 t4 = time.perf_counter()
 print(f"[GUI] Main UI Ready: {t4 - t3:.3f}s")
@@ -997,4 +1027,4 @@ print(f"[GUI] Total: {t4 - t1:.3f}s")
 
 
 def start_window():
-    win.loop()
+    MainApp(tk.Tk()).run()

@@ -1,4 +1,2 @@
-tkreform>=0.3.3
-nb-cli>=1.0.0
-python-dotenv>=1.0.0
+tkreform>=0.3.4
 nonebot-desktop-wing>=0.2.0
