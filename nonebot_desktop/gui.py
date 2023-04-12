@@ -8,7 +8,7 @@ from pathlib import Path
 from subprocess import Popen
 import sys
 from threading import Thread, Timer
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
 t1 = time.perf_counter()
 print(f"[GUI] Import base: {t1 - t0:.3f}s")
@@ -24,13 +24,13 @@ from nonebot_desktop_wing import (
     PYPI_MIRRORS, meta, create, rrggbb_bg2fg, getdist, find_python,
     recursive_find_env_config, recursive_update_env_config, molecules,
     exec_new_win, open_new_win, system_open, get_toml_config, lazylib,
-    get_builtin_plugins
+    get_builtin_plugins, find_env_file, list_paginate
 )
 
 t1_2 = time.perf_counter()
 print(f"[GUI] Import this module: {t1_2 - t1_1:.3f}s")
 
-from tkreform import Packer
+from tkreform import Packer, Widget
 from tkreform.base import Application
 from tkreform.declarative import M, W, Gridder, MenuBinder, NotebookAdder
 from tkreform.menu import MenuCascade, MenuCommand, MenuSeparator
@@ -54,6 +54,7 @@ class Context:
         self.tmpindex = StringVar()
         self.curproc: Optional[Popen[bytes]] = None
         self.curdists: List["Distribution"] = []
+        self.distvar = StringVar()
         self.cwd.trace_add("write", self.cwd_updator)
 
     @property
@@ -74,11 +75,9 @@ class Context:
 
     def upddists(self) -> None:
         self.curdists = list(getdist(self.cwd_str))
+        self.curdistnames = [d.metadata["name"].lower() for d in self.curdists]
+        self.distvar.set(self.curdistnames)  # type: ignore
         print("[upddists] Updated current dists")
-
-    @property
-    def curdistnames(self) -> List[str]:
-        return [d.metadata["name"].lower() for d in self.curdists]
 
     @property
     def cwd_valid(self) -> bool:
@@ -100,13 +99,17 @@ class Context:
             Thread(target=self.upddists).start()
             print(f"[cwd_updator] Current directory is set to {self.cwd_str!r}")
 
-    def check_pyproject_toml(self):
+    def check_pyproject_toml(self) -> None:
         if (self.cwd_path / "bot.py").exists():
             if (self.cwd_path / "pyproject.toml").exists():
                 messagebox.showwarning("警告", "检测到目录下存在 bot.py，其可能不会使用 pyproject.toml 中的配置项。", master=self.main.win.base)
             else:
                 messagebox.showerror("错误", "当前目录下没有 pyproject.toml，无法修改配置。", master=self.main.win.base)
                 raise Exception("当前目录下没有 pyproject.toml，无法修改配置。")
+
+    @property
+    def curdist_dict(self):
+        return {dist.name: dist for dist in self.curdists}
 
 
 class ApplicationWithContext(Application):
@@ -135,16 +138,16 @@ class MainApp(Application):
                     MenuCommand(label="退出", font=font10, command=self.win.destroy, accelerator="Alt+F4")
                 ),
                 M(MenuCascade(label="配置", font=font10), tearoff=False) * MenuBinder() / (
-                    MenuCommand(label="配置文件编辑器", command=internal_env_edit, font=font10),
+                    MenuCommand(label="配置文件编辑器", command=lambda: DotenvEditor(self.win.sub_window(), self.context), font=font10),
                     MenuSeparator(),
                     MenuCommand(label="管理驱动器", command=lambda: DriverManager(self.win.sub_window(), self.context), font=font10),
                     MenuCommand(label="管理适配器", command=lambda: AdapterManager(self.win.sub_window(), self.context), font=font10),
                     MenuSeparator(),
-                    MenuCommand(label="管理环境", command=enviroman, font=font10)
+                    MenuCommand(label="管理环境", command=lambda: EnvironmentManager(self.win.sub_window(), self.context), font=font10)
                 ),
                 M(MenuCascade(label="插件", font=font10), tearoff=False) * MenuBinder() / (
                     MenuCommand(label="管理内置插件", command=lambda: BuiltinPlugins(self.win.sub_window(), self.context), font=font10),
-                    MenuCommand(label="插件商店", command=plugin_store, font=font10),
+                    MenuCommand(label="插件商店", command=lambda: PluginStore(self.win.sub_window(), self.context), font=font10),
                 ),
                 M(MenuCascade(label="高级", font=font10), tearoff=False) * MenuBinder() / (
                     MenuCommand(label="打开命令行窗口", font=font10, command=lambda: open_new_win(self.context.cwd_path)),
@@ -167,13 +170,13 @@ class MainApp(Application):
 
         self.context.cwd_updator()
 
-    def run(self):
+    def run(self) -> None:
         self.win.loop()
 
-    def open_project(self):
+    def open_project(self) -> None:
         self.context.cwd_str = filedialog.askdirectory(mustexist=True, parent=self.win.base, title="选择项目目录")
 
-    def start(self):
+    def start(self) -> None:
         if not self.context.cwd_valid:
             messagebox.showerror("错误", "当前目录不是正确的项目目录。", master=self.win.base)
             return
@@ -197,7 +200,7 @@ class MainApp(Application):
 
         Thread(target=_restore).start()
 
-    def open_pdir(self):
+    def open_pdir(self) -> None:
         if not self.context.cwd_valid:
             messagebox.showerror("错误", "当前目录不是正确的项目目录。", master=self.win.base)
             return
@@ -257,7 +260,7 @@ class CreateProject(ApplicationWithContext):
     def ct_path(self) -> Path:
         return Path(self.ct_str)
 
-    def ct_checker(self, *_):
+    def ct_checker(self, *_) -> None:
         # For valid target:
         # - target is a path
         # - target does not exist or is empty dir
@@ -274,10 +277,10 @@ class CreateProject(ApplicationWithContext):
             _state = False
         self.create_btn.disabled = _state
 
-    def ct_browse(self):
+    def ct_browse(self) -> None:
         self.ct_str = filedialog.askdirectory(parent=self.win.base, title="选择项目目录")
 
-    def perform_create(self):
+    def perform_create(self) -> None:
         drivs = [d for d, b in zip(meta.drivers, self.driver_select_state) if b.get()]
         adaps = [a for a, b in zip(meta.adapters, self.adapter_select_state) if b.get()]
         if not drivs:
@@ -331,7 +334,7 @@ class DriverManager(ApplicationWithContext):
 
         self.driver_st_updator()
 
-    def driver_st_updator(self):
+    def driver_st_updator(self) -> None:
         _enabled = recursive_find_env_config(self.context.cwd_str, "DRIVER")
         if _enabled is None:
             enabled = []
@@ -350,11 +353,11 @@ class DriverManager(ApplicationWithContext):
             else:
                 self.drv_installed_states[n].set("内置")
                 self.win[0][n][1][0].disabled = False
-                self.win[0][n][1][0].disabled = True
+                self.win[0][n][1][1].disabled = True
 
             self.drv_enabled_states[n].set("禁用" if d.module_name in enabled else "启用")
 
-    def perform_enable(self, n: int):
+    def perform_enable(self, n: int) -> None:
         target = meta.drivers[n]
         _enabled = recursive_find_env_config(self.context.cwd_str, "DRIVER")
         if _enabled is None:
@@ -371,7 +374,7 @@ class DriverManager(ApplicationWithContext):
         self.context.upddists()
         self.driver_st_updator()
 
-    def perform_install(self, n: int):
+    def perform_install(self, n: int) -> None:
         target = meta.drivers[n]
         cfp = self.context.cwd_path
         self.win[0][n][1][1].disabled = True
@@ -387,12 +390,12 @@ class DriverManager(ApplicationWithContext):
             try:
                 while p.poll() is None:
                     pass
-                self.context.upddists()
             except Exception as e:
                 messagebox.showerror("错误", f"{e}", master=self.win.base)
             finally:
-                self.driver_st_updator()
                 os.remove(tmp)
+                self.context.upddists()
+                self.driver_st_updator()
 
         Thread(target=_restore).start()
 
@@ -425,7 +428,7 @@ class AdapterManager(ApplicationWithContext):
 
         self.adapter_st_updator()
 
-    def adapter_st_updator(self):
+    def adapter_st_updator(self) -> None:
         conf = get_toml_config(self.context.cwd_str)
         if not (data := conf._get_data()):
             raise RuntimeError("Config file not found!")
@@ -439,7 +442,7 @@ class AdapterManager(ApplicationWithContext):
             self.adp_enabled_state[n].set("禁用" if d.module_name in enabled else "启用")
             self.win[0][n][1][1].disabled = d.module_name in enabled
 
-    def perform_enable(self, n: int):
+    def perform_enable(self, n: int) -> None:
         target = meta.adapters[n]
         slimtarget = lazylib.nb_cli.config.SimpleInfo.parse_obj(target)
         conf = get_toml_config(self.context.cwd_str)
@@ -449,7 +452,7 @@ class AdapterManager(ApplicationWithContext):
             conf.add_adapter(slimtarget)
         self.adapter_st_updator()
 
-    def perform_install(self, n: int):
+    def perform_install(self, n: int) -> None:
         target = meta.adapters[n]
         cfp = Path(self.context.cwd_str)
         self.win[0][n][1][1].disabled = True
@@ -472,12 +475,12 @@ class AdapterManager(ApplicationWithContext):
             try:
                 while p.poll() is None:
                     pass
-                self.context.upddists()
             except Exception as e:
                 messagebox.showerror("错误", f"{e}", master=self.win.base)
             finally:
-                self.adapter_st_updator()
                 os.remove(tmp)
+                self.context.upddists()
+                self.adapter_st_updator()
 
         Thread(target=_restore).start()
 
@@ -501,7 +504,7 @@ class BuiltinPlugins(ApplicationWithContext):
 
         self.updstate()
 
-    def updstate(self):
+    def updstate(self) -> None:
         cfg = get_toml_config(self.context.cwd_str)
         if not (data := cfg._get_data()):
             raise RuntimeError("Config file not found!")
@@ -510,7 +513,7 @@ class BuiltinPlugins(ApplicationWithContext):
         for n, pl in enumerate(self.builtin_plugins):
             self.bp_enabled_states[n].set("禁用" if pl in plugins else "启用")
 
-    def setnstate(self, n: int):
+    def setnstate(self, n: int) -> None:
         cfg = get_toml_config(self.context.cwd_str)
         if self.bp_enabled_states[n].get() == "启用":
             cfg.add_builtin_plugin(self.builtin_plugins[n])
@@ -519,132 +522,156 @@ class BuiltinPlugins(ApplicationWithContext):
         self.updstate()
 
 
-# TODO: refactor.
-def enviroman():
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 管理环境"
-    subw.size = 720, 460
-    subw.base.grab_set()
+class EnvironmentManager(ApplicationWithContext):
+    def setup(self) -> None:
+        self.win.title = "NoneBot Desktop - 管理环境"
+        self.win.size = 720, 460
+        self.win.base.grab_set()
+        self.curpkg: str = ""
 
-    curdist = ""
-    _dist_index = {}
-    dists = StringVar()
-
-    def update_dists_list():
-        _dists = list(getdist(self.context.cwd_str))
-        if not _dists:
-            _dists = list(exops.current_distros())
-
-        _dist_index.clear()
-        _dist_index.update({d.name: d for d in _dists})
-
-        global curdistnames
-        dists.set(curdistnames := [x for x in _dist_index])  # type: ignore
-        print("[environman::update_dists_list] Updated current distnames in global")
-
-    update_dists_list()
-
-    def pkgop(op: str):
-        cfp = Path(self.context.cwd_str)
-        subw[0][0][0].disabled = True
-        subw[0][1][2][0].disabled = True
-        subw[0][1][1][0].disabled = True
-        subw[0][1][1][1].disabled = True
-        p, tmp = exops.exec_new_win(
-            cfp,
-            f'''"{exops.find_python(cfp)}" -m pip {op} "{curdist}"'''
+        self.win /= (
+            W(tk.PanedWindow, showhandle=True) * Packer(fill="both", expand=True) / (
+                W(tk.LabelFrame, text="程序包", font=font10) / (
+                    W(tk.Listbox, listvariable=self.context.distvar, font=mono10) * Packer(side="left", fill="both", expand=True),
+                    W(ttk.Scrollbar) * Packer(side="right", fill="y")
+                ),
+                W(tk.LabelFrame, text="详细信息", font=font10) / (
+                    W(tk.Label, text="双击程序包以查看信息", font=font10, justify="left", wraplength=400) * Packer(anchor="nw", expand=True),
+                    W(tk.Frame) * Packer(side="bottom", fill="x") / (
+                        W(tk.Button, text="更新", command=self.perform_upgrade, font=font10, state="disabled") * Packer(side="left", fill="x", expand=True),
+                        W(tk.Button, text="卸载", command=self.perform_uninstall, font=font10, state="disabled") * Packer(side="right", fill="x", expand=True)
+                    ),
+                    W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="bottom", expand=True) / (
+                        W(ttk.Combobox, textvariable=self.context.tmpindex, value=PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
+                    )
+                )
+            ),
         )
 
-        def _restore():
-            if p:
-                while p.poll() is None:
-                    pass
-                os.remove(tmp)
-                update_dists_list()
-                subw[0][0][0].disabled = False
-                subw[0][1][2][0].disabled = False
-                _infoupd()
+        li = cast(tk.Listbox, self.win[0][0][0].base)
+        sl = cast(ttk.Scrollbar, self.win[0][0][1].base)
+        li.config(yscrollcommand=sl.set)
+        sl.config(command=li.yview)
 
-        Thread(target=_restore).start()
+        @self.win[0][0][0].on(str(LMB - X2))
+        def showinfo(event: Event):
+            self.curpkg = event.widget.get(event.widget.curselection())
+            self.info_updator()
 
-    subw /= (
-        W(tk.PanedWindow, showhandle=True) * Packer(fill="both", expand=True) / (
-            W(tk.LabelFrame, text="程序包", font=font10) / (
-                W(tk.Listbox, listvariable=dists, font=mono10) * Packer(side="left", fill="both", expand=True),
-                W(ttk.Scrollbar) * Packer(side="right", fill="y")
-            ),
-            W(tk.LabelFrame, text="详细信息", font=font10) / (
-                W(tk.Message, text="双击程序包以查看信息", font=font10, justify="left", width=400) * Packer(anchor="nw", expand=True),
-                W(tk.Frame) * Packer(side="bottom", fill="x") / (
-                    W(tk.Button, text="更新", command=lambda: pkgop("install -U" + (f" -i {tmpindex.get()}" if tmpindex.get() else "")), font=font10, state="disabled") * Packer(side="left", fill="x", expand=True),
-                    W(tk.Button, text="卸载", command=lambda: pkgop("uninstall"), font=font10, state="disabled") * Packer(side="right", fill="x", expand=True)
-                ),
-                W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", side="bottom", expand=True) / (
-                    W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
-                )
-            )
-        ),
-    )
-
-    li: tk.Listbox = subw[0][0][0].base  # type: ignore
-    sl: ttk.Scrollbar = subw[0][0][1].base  # type: ignore
-    li.config(yscrollcommand=sl.set)
-    sl.config(command=li.yview)
-
-    def _infoupd():
-        if m := _dist_index.get(curdist, None):
+    def info_updator(self) -> None:
+        if m := self.context.curdist_dict.get(self.curpkg, None):
             dm = m.metadata
-            subw[0][1][0].text = (
+            self.win[0][1][0].text = (
                 f"名称：{dm['name']}\n"
                 f"版本：{dm['version']}\n"
                 f"摘要：{dm['summary']}\n"
             )
         else:
-            subw[0][1][0].text = "双击程序包以查看信息"
+            self.win[0][1][0].text = "双击程序包以查看信息"
 
-        subw[0][1][1][0].disabled = not m
-        subw[0][1][1][1].disabled = not m
+        self.win[0][1][1][0].disabled = not m
+        self.win[0][1][1][1].disabled = not m
 
-    @subw[0][0][0].on(str(LMB - X2))
-    def showinfo(event: Event):
-        nonlocal curdist
-        curdist = event.widget.get(event.widget.curselection())
-        _infoupd()
+    def lock_when_perform(self, lock: bool = True) -> None:
+        self.win[0][0][0].disabled = lock
+        self.win[0][1][2][0].disabled = lock
+
+    def restore_after_perform(self, popen, tmpfile) -> None:
+        try:
+            while popen.poll() is None:
+                pass
+        except Exception as e:
+            messagebox.showerror("错误", f"{e}", master=self.win.base)
+        finally:
+            os.remove(tmpfile)
+            self.context.upddists()
+            self.lock_when_perform(False)
+            self.info_updator()
+
+    def perform_upgrade(self) -> None:
+        self.lock_when_perform(True)
+        self.win[0][1][1][0].disabled = True
+        self.win[0][1][1][1].disabled = True
+
+        p, tmp = molecules.perform_pip_install(
+            str(find_python(self.context.cwd_str)),
+            self.curpkg,
+            update=True,
+            index=self.context.tmp_index,
+            new_win=True
+        )
+
+        Thread(target=self.restore_after_perform, args=(p, tmp)).start()
+
+    def perform_uninstall(self) -> None:
+        self.lock_when_perform(True)
+        self.win[0][1][1][0].disabled = True
+        self.win[0][1][1][1].disabled = True
+
+        p, tmp = molecules.perform_pip_command(
+            str(find_python(self.context.cwd_str)),
+            "uninstall", self.curpkg, new_win=True
+        )
+
+        Thread(target=self.restore_after_perform, args=(p, tmp)).start()
 
 
-# TODO: refactor.
-def internal_env_edit():
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 配置文件编辑器"
-    subw.base.grab_set()
+class DotenvEditor(ApplicationWithContext):
+    def setup(self) -> None:
+        self.win.title = "NoneBot Desktop - 配置文件编辑器"
+        self.win.base.grab_set()
+        self.allenvs = find_env_file(self.context.cwd_str)
+        self.target = StringVar(value="[请选择一个配置文件进行编辑]")
+        self.curenv = DotEnv(self.target_name)
+        self.curopts: List[Tuple[StringVar, StringVar]] = []
 
-    allenvs = exops.find_env_file(self.context.cwd_str)
-    envf = StringVar(value="[请选择一个配置文件进行编辑]")
-    curenv = DotEnv(envf.get())
-    curopts = []
-
-    def envf_updator(varname: str = "", _unknown: str = "", op: str = ""):
-        invalid = envf.get() not in allenvs
-        subw[2][0].disabled = invalid
-        subw[2][1].disabled = invalid
-        if not invalid:
-            nonlocal curenv, curopts
-            curenv = DotEnv(Path(self.context.cwd_str) / envf.get())
-            curopts = [(StringVar(value=k), StringVar(value=v)) for k, v in curenv.dict().items() if v is not None]
-            subw[1] /= (
-                W(tk.Frame) * Gridder(column=0, sticky="w") / (
-                    W(tk.Entry, textvariable=k, font=mono10) * Packer(side="left"),
-                    W(tk.Label, text=" = ", font=mono10) * Packer(side="left"),
-                    W(tk.Entry, textvariable=v, font=mono10, width=40) * Packer(side="left")
-                ) for k, v in curopts
+        self.win /= (
+            W(tk.LabelFrame, text="可用配置文件", font=font10) * Packer(anchor="nw", fill="x", expand=True) / (
+                W(ttk.Combobox, font=font10, textvariable=self.target, value=self.allenvs, width=50) * Packer(fill="x", expand=True, side="left"),
+                W(tk.Button, text="新建", font=font10, command=self.create_env, state="disabled") * Packer(side="left")
+            ),
+            W(tk.LabelFrame, text="配置项", font=font10) * Packer(anchor="nw", fill="both", expand=True),
+            W(tk.Frame) * Packer(anchor="sw", fill="x", expand=True) / (
+                W(tk.Button, text="新建配置项", font=font10, command=self.new_option) * Packer(side="left"),
+                W(tk.Button, text="保存", font=font10, command=self.save_env) * Packer(side="right"),
             )
+        )
 
-    envf.trace_add("write", envf_updator)
+        self.save_btn = cast(Widget[tk.Button], self.win[2][1])
 
-    def new_opt():
+        self.target.trace_add("write", self.envf_updator)
+        self.envf_updator()
+
+    @property
+    def target_name(self) -> str:
+        return self.target.get()
+
+    def envf_updator(self, *_) -> None:
+        invalid = self.target_name not in self.allenvs
+        self.win[2][0].disabled = invalid
+        self.save_btn.disabled = invalid
+        self.win[0][1].disabled = not invalid
+        if invalid:
+            return
+        self.curenv = DotEnv(self.context.cwd_path / self.target_name)
+        self.curopts = [(StringVar(value=k), StringVar(value=v)) for k, v in self.curenv.dict().items() if v is not None]
+        self.win[1] /= (
+            W(tk.Frame) * Packer(fill="x", expand=True) / (
+                W(tk.Entry, textvariable=k, font=mono10) * Packer(side="left"),
+                W(tk.Label, text=" = ", font=mono10) * Packer(side="left"),
+                W(tk.Entry, textvariable=v, font=mono10) * Packer(fill="x", expand=True, side="left")
+            ) for k, v in self.curopts
+        )
+
+    def create_env(self):
+        self.allenvs.append(self.target_name)
+        self.win[0][0].base["value"] = self.allenvs
+        self.envf_updator()
+
+    def new_option(self) -> None:
         k, v = StringVar(value="参数名"), StringVar(value="值")
-        curopts.append((k, v))
-        _row = subw[1].add_widget(tk.Frame)
+        self.curopts.append((k, v))
+        _row = self.win[1].add_widget(tk.Frame)
         _row.grid(column=0, sticky="w")
         _key = _row.add_widget(tk.Entry, textvariable=k, font=mono10)
         _lbl = _row.add_widget(tk.Label, text=" = ", font=mono10)
@@ -653,55 +680,93 @@ def internal_env_edit():
         _lbl.pack(side="left")
         _val.pack(side="left")
 
-    def save_env():
-        with open(Path(self.context.cwd_str) / envf.get(), "w") as f:
-            f.writelines(f"{k}={v}\n" for k, v in ((_k.get(), _v.get()) for _k, _v in curopts) if k and v)
+    def save_env(self):
+        try:
+            with open(self.context.cwd_path / self.target_name, "w") as f:
+                f.writelines(f"{k}={v}\n" for k, v in ((_k.get(), _v.get()) for _k, _v in self.curopts) if k and v)
+        except Exception as e:
+            messagebox.showerror("错误", f"{e}", master=self.win.base)
+            return
 
         def _success():
-            subw[2][1].text = "已保存"
-            time.sleep(3)
-            subw[2][1].text = "保存"
+            try:
+                self.save_btn.text = "已保存"
+                time.sleep(3)
+                self.save_btn.text = "保存"
+            except TclError:
+                pass
 
-        envf_updator()
-
+        self.envf_updator()
         Thread(target=_success).start()
 
-    subw /= (
-        W(tk.LabelFrame, text="可用配置文件", font=font10) * Gridder(column=0, sticky="w") / (
-            W(ttk.Combobox, font=font10, textvariable=envf, value=allenvs, width=50) * Packer(expand=True),
-        ),
-        W(tk.LabelFrame, text="配置项", font=font10) * Gridder(column=0, sticky="w"),
-        W(tk.Frame) * Gridder(column=0, sticky="e") / (
-            W(tk.Button, text="新建配置项", font=font10, command=new_opt) * Packer(side="left"),
-            W(tk.Button, text="保存", font=font10, command=save_env) * Packer(side="right"),
-        )
-    )
-    envf_updator()
 
-
-# TODO: refactor.
-def plugin_store():
-    check_pyproject_toml(Path(self.context.cwd_str), win.base)
-    subw = win.sub_window()
-    subw.title = "NoneBot Desktop - 插件商店"
-    subw.base.grab_set()
-
+class PluginStore(ApplicationWithContext):
     PAGESIZE = 8
-    all_plugins = meta.raw_plugins
-    all_plugins_paged = res.list_paginate(all_plugins, PAGESIZE)
-    cur_plugins_paged = all_plugins_paged
-    pageinfo_cpage = IntVar(value=1)
-    pageinfo_mpage = len(cur_plugins_paged)
-    pluginvars_i = [StringVar(value="安装") for _ in range(PAGESIZE)]
-    pluginvars_e = [StringVar(value="启用") for _ in range(PAGESIZE)]
+    sortmethods: Dict[str, Callable[[list], list]] = {
+        "发布时间（旧-新）": lambda x: x,
+        "发布时间（新-旧）": lambda x: list(reversed(x)),
+        "模块名（A-Z）": lambda x: sorted(x, key=lambda p: p["module_name"]),
+    }
 
-    def updpluginvars():
+    def setup(self) -> None:
+        self.context.check_pyproject_toml()
+        self.win.title = "NoneBot Desktop - 插件商店"
+        self.win.base.grab_set()
+        self.all_plugins = meta.raw_plugins
+        self.all_plugins_paged = self.cur_plugins_paged = list_paginate(self.all_plugins, self.PAGESIZE)
+        self.pageinfo_cpage = IntVar(value=1)
+        self.pageinfo_mpage = len(self.cur_plugins_paged)
+        self.pluginvars_i = [StringVar(value="安装") for _ in range(self.PAGESIZE)]
+        self.pluginvars_e = [StringVar(value="启用") for _ in range(self.PAGESIZE)]
+
+        self.searchvar = StringVar(value="")
+        self.search_timer = Timer(0.8, lambda: None)
+
+        self.sortvar = StringVar(value="发布时间（旧-新）")
+
+        self.win /= (
+            W(tk.Frame) * Packer(anchor="nw", expand=True, fill="x") / (
+                W(tk.LabelFrame, text="搜索", font=font10) * Packer(anchor="nw", expand=True, fill="x", side="left") / (
+                    W(tk.Entry, textvariable=self.searchvar, font=font10) * Packer(expand=True, fill="x"),
+                ),
+                W(tk.LabelFrame, text="排序", font=font10) * Packer(anchor="nw", side="left") / (
+                    W(ttk.Combobox, textvariable=self.sortvar, value=list(self.sortmethods.keys()), font=font10) * Packer(expand=True, fill="x"),
+                ),
+            ),
+            W(tk.LabelFrame, text=self._getrealpageinfo(), font=font10) * Packer(anchor="nw", expand=True, fill="x"),
+            W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", expand=True) / (
+                W(ttk.Combobox, textvariable=self.context.tmpindex, value=PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
+            ),
+            W(tk.Frame) * Packer(anchor="sw", expand=True, fill="x") / (
+                W(tk.Button, text="首页", font=font10, command=lambda: self.gotopage(0)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
+                W(tk.Button, text="上一页", font=font10, command=lambda: self.chpage(-1)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
+                W(ttk.Combobox, textvariable=self.pageinfo_cpage, width=8, font=("Microsoft Yahei UI", 14)) * Packer(anchor="nw", side="left"),
+                W(tk.Button, text="下一页", font=font10, command=lambda: self.chpage(1)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
+                W(tk.Button, text="尾页", font=font10, command=lambda: self.gotopage(-1)) * Packer(anchor="nw", expand=True, fill="x", side="left")
+            )
+        )
+
+        self.pageinfo_cpage.trace_add("write", self.changepageno)
+        self.sortvar.trace_add("write", self.do_search)
+        self.searchvar.trace_add("write", self.applysearch)
+
+        self.update_page()
+        self.updpageinfo()
+
+    def changepageno(self, *_):
+        self.win[1].text = self._getrealpageinfo()
+        self.update_page()
+
+    def _pluginwidget(self, n: int):
+        return self.win[1][n][1]
+
+    def updpluginvars(self):
         try:
-            cpage = pageinfo_cpage.get()
+            cpage = self.pageinfo_cpage.get()
         except TclError:
             return
-        curpage = cur_plugins_paged[cpage - 1] if cur_plugins_paged else []
-        conf = exops.get_toml_config(self.context.cwd_str)
+        curpage = self.cur_plugins_paged[cpage - 1] if self.cur_plugins_paged else []
+        conf = get_toml_config(self.context.cwd_str)
         if not (data := conf._get_data()):
             raise RuntimeError("Config file not found!")
         table: Dict[str, Any] = data.setdefault("tool", {}).setdefault("nonebot", {})
@@ -709,168 +774,52 @@ def plugin_store():
         enabled = [a for a in _enabled]
 
         for n, d in enumerate(curpage):
-            pluginvars_i[n].set("卸载" if d["project_link"] in curdistnames else "安装")
-            pluginvars_e[n].set("禁用" if d["module_name"] in enabled else "启用")
+            self.pluginvars_i[n].set("卸载" if d["project_link"] in self.context.curdistnames else "安装")
+            self.pluginvars_e[n].set("禁用" if d["module_name"] in enabled else "启用")
+            self._pluginwidget(n)[1].disabled = not d["project_link"] in self.context.curdistnames
+            self._pluginwidget(n)[2].disabled = d["module_name"] in enabled
 
-    def getnenabledstate(n: int):
-        return "disabled" if pluginvars_i[n].get() == "安装" else "normal"
+    def _getrealpageinfo(self) -> str:
+        try:
+            cpage = self.pageinfo_cpage.get()
+            return f"第 {cpage}/{self.pageinfo_mpage} 页"
+        except TclError:
+            return self.win[1].text
 
-    def getninstalledstate(n: int):
-        return "disabled" if pluginvars_e[n].get() == "禁用" else "normal"
+    def updpageinfo(self):
+        self.pageinfo_cpage.set(1)
+        self.pageinfo_mpage = len(self.cur_plugins_paged)
+        self.win[3][2].base["values"] = list(range(1, self.pageinfo_mpage + 1))
 
-    @partial(pageinfo_cpage.trace_add, "write")
-    def changepageno(*_):
-        subw[1].text = _getrealpageinfo()
-        update_page()
-
-    def updpageinfo():
-        nonlocal pageinfo_mpage
-        pageinfo_cpage.set(1)
-        pageinfo_mpage = len(cur_plugins_paged)
-        subw[3][2].base["values"] = list(range(1, pageinfo_mpage + 1))
-
-    def plugin_context(pl):
+    def plugin_context(self, pl):
         return (
             "{name} {project_link} {module_name} {author} ".format(**pl) +
             " ".join(tag["label"] for tag in pl["tags"])
         ).lower()
 
-    searchvar = StringVar(value="")
-    search_timer = Timer(0.8, lambda: None)
-
-    sortvar = StringVar(value="发布时间（旧-新）")
-    sortvalues = {
-        "发布时间（旧-新）": lambda x: x,
-        "发布时间（新-旧）": lambda x: list(reversed(x)),
-        "模块名（A-Z）": lambda x: sorted(x, key=lambda p: p["module_name"]),
-    }
-
-    def do_search(*_):
-        sortkey = sortvar.get()
-        if sortkey not in sortvalues:
-            return
-        nonlocal cur_plugins_paged
-        kwd = searchvar.get().lower()
-        if not kwd:
-            cur_plugins_paged = res.list_paginate(sortvalues[sortkey](all_plugins), PAGESIZE)
+    def chpage(self, offset: int):
+        if self.pageinfo_mpage:
+            self.pageinfo_cpage.set((self.pageinfo_cpage.get() - 1 + offset) % self.pageinfo_mpage + 1)
         else:
-            kwds = kwd.split()
-            cur_plugins_paged = res.list_paginate(
-                sortvalues[sortkey]([x for x in all_plugins if all(k in plugin_context(x) for k in kwds)]),
-                PAGESIZE
-            )
-        updpageinfo()
-        gotopage(0)
+            self.pageinfo_cpage.set(0)
 
-    sortvar.trace_add("write", do_search)
-
-    @partial(searchvar.trace_add, "write")
-    def applysearch(*_):
-        nonlocal search_timer
-        search_timer.cancel()
-        search_timer = Timer(0.5, do_search)
-        search_timer.start()
-
-    def _getrealpageinfo():
-        try:
-            cpage = pageinfo_cpage.get()
-            return f"第 {cpage}/{pageinfo_mpage} 页"
-        except TclError:
-            return subw[1].text
-
-    def _getpluginextendedname(plugin):
-        # if plugin["name"] == plugin["project_link"]:
-        #     return "{name} by {author}".format(**plugin)
-        # if plugin["project_link"].startswith("git+"):
-        #     return "{name} (git+...) by {author}".format(**plugin)
-        # return "{name} ({project_link}) by {author}".format(**plugin)
-        return "{name} by {author}".format(**plugin)
-
-    def perform_install(n: int):
-        try:
-            cpage = pageinfo_cpage.get()
-        except TclError:
-            return
-
-        subw[0][0][0].disabled = True
-        for i in range(5):
-            subw[3][i].disabled = True
-
-        target = cur_plugins_paged[cpage - 1][n]
-        cfp = Path(self.context.cwd_str)
-        subw[1][n][1][2].disabled = True
-        pip_op = "install" if pluginvars_i[n].get() == "安装" else "uninstall"
-
-        p, tmp = exops.exec_new_win(
-            cfp,
-            f'''"{exops.find_python(cfp)}" -m pip {pip_op} "{target['project_link']}"'''
-        )
-
-        def _restore():
-            if p:
-                while p.poll() is None:
-                    pass
-                os.remove(tmp)
-                upddists()
-                updpluginvars()
-                subw[1][n][1][1].base["state"] = getnenabledstate(n)
-                subw[1][n][1][2].base["state"] = getninstalledstate(n)
-                subw[0][0][0].disabled = False
-                for i in range(5):
-                    subw[3][i].disabled = False
-
-        Thread(target=_restore).start()
-
-    def perform_enable(n: int):
-        try:
-            cpage = pageinfo_cpage.get()
-        except TclError:
-            return
-        target = cur_plugins_paged[cpage - 1][n]["module_name"]
-        conf = exops.get_toml_config(self.context.cwd_str)
-        if pluginvars_e[n].get() == "禁用":
-            conf.remove_plugin(target)
+    def gotopage(self, page: int):
+        if self.pageinfo_mpage:
+            self.pageinfo_cpage.set(page % self.pageinfo_mpage + 1)
         else:
-            conf.add_plugin(target)
+            self.pageinfo_cpage.set(0)
 
-        updpluginvars()
-        subw[1][n][1][1].base["state"] = getnenabledstate(n)
-        subw[1][n][1][2].base["state"] = getninstalledstate(n)
-
-    subw /= (
-        W(tk.Frame) * Packer(anchor="nw", expand=True, fill="x") / (
-            W(tk.LabelFrame, text="搜索", font=font10) * Packer(anchor="nw", expand=True, fill="x", side="left") / (
-                W(tk.Entry, textvariable=searchvar, font=font10) * Packer(expand=True, fill="x"),
-            ),
-            W(tk.LabelFrame, text="排序", font=font10) * Packer(anchor="nw", side="left") / (
-                W(ttk.Combobox, textvariable=sortvar, value=list(sortvalues.keys()), font=font10) * Packer(expand=True, fill="x"),
-            ),
-        ),
-        W(tk.LabelFrame, text=_getrealpageinfo(), font=font10) * Packer(anchor="nw", expand=True, fill="x"),
-        W(tk.LabelFrame, text="自定义下载源", font=font10) * Packer(anchor="sw", fill="x", expand=True) / (
-            W(ttk.Combobox, textvariable=tmpindex, value=res.PYPI_MIRRORS, font=mono10) * Packer(side="left", fill="x", expand=True),
-        ),
-        W(tk.Frame) * Packer(anchor="sw", expand=True, fill="x") / (
-            W(tk.Button, text="首页", font=font10, command=lambda: gotopage(0)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
-            W(tk.Button, text="上一页", font=font10, command=lambda: chpage(-1)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
-            W(ttk.Combobox, textvariable=pageinfo_cpage, width=8, font=("Microsoft Yahei UI", 14)) * Packer(anchor="nw", side="left"),
-            W(tk.Button, text="下一页", font=font10, command=lambda: chpage(1)) * Packer(anchor="nw", expand=True, fill="x", side="left"),
-            W(tk.Button, text="尾页", font=font10, command=lambda: gotopage(-1)) * Packer(anchor="nw", expand=True, fill="x", side="left")
-        )
-    )
-
-    def update_page():
+    def update_page(self):
         try:
-            cpage = pageinfo_cpage.get()
+            cpage = self.pageinfo_cpage.get()
         except TclError:
             return
-        updpluginvars()
         LABEL_NCH = 40
         LABEL_NCH_PX_FACTOR = 8
-        plugins_display = cur_plugins_paged[cpage - 1] if cur_plugins_paged else []
-        subw[1] /= (
+        plugins_display = self.cur_plugins_paged[cpage - 1] if self.cur_plugins_paged else []
+        self.win[1] /= (
             (
-                W(tk.LabelFrame, text=_getpluginextendedname(pl), fg="green" if pl["is_official"] else "black", font=font10) * Gridder(column=n & 1, row=n // 2, sticky="w") / (
+                W(tk.LabelFrame, text=self._getpluginextendedname(pl), fg="green" if pl["is_official"] else "black", font=font10) * Gridder(column=n & 1, row=n // 2, sticky="w") / (
                     W(tk.Frame) * Packer(anchor="w", expand=True, fill="x", side="left") / (
                         W(tk.Label, text=pl["desc"], font=font10, width=LABEL_NCH, height=4, wraplength=LABEL_NCH * LABEL_NCH_PX_FACTOR, justify="left") * Packer(anchor="w", expand=True, fill="x", padx=3, pady=3, side="top"),
                         W(tk.Frame) * Packer(anchor="w", expand=True, fill="x", padx=3, pady=3, side="top") / (
@@ -879,28 +828,97 @@ def plugin_store():
                         )
                     ),
                     W(tk.Frame) * Packer(anchor="w", side="left") / (
-                        W(tk.Button, text="主页", font=font10, command=partial(exops.system_open, pl["homepage"])) * Packer(anchor="w", expand=True, fill="x", side="top"),
-                        W(tk.Button, textvariable=pluginvars_e[n], command=partial(perform_enable, n), state=getnenabledstate(n), font=font10) * Packer(anchor="w", expand=True, fill="x", side="top"),
-                        W(tk.Button, textvariable=pluginvars_i[n], command=partial(perform_install, n), state=getninstalledstate(n), font=font10) * Packer(anchor="w", expand=True, fill="x", side="top"),
+                        W(tk.Button, text="主页", font=font10, command=partial(system_open, pl["homepage"])) * Packer(anchor="w", expand=True, fill="x", side="top"),
+                        W(tk.Button, textvariable=self.pluginvars_e[n], command=partial(self.perform_enable, n), font=font10) * Packer(anchor="w", expand=True, fill="x", side="top"),
+                        W(tk.Button, textvariable=self.pluginvars_i[n], command=partial(self.perform_install, n), font=font10) * Packer(anchor="w", expand=True, fill="x", side="top"),
                     )
                 )
             ) for n, pl in enumerate(plugins_display)
         )
+        self.updpluginvars()
 
-    def chpage(offset: int):
-        if pageinfo_mpage:
-            pageinfo_cpage.set((pageinfo_cpage.get() - 1 + offset) % pageinfo_mpage + 1)
+    def _getpluginextendedname(self, plugin):
+        return "{name} by {author}".format(**plugin)
+    
+    def _lock_search_and_page(self, lock: bool):
+        self.win[0][0][0].disabled = self.win[0][0][1].disabled = lock
+        for w in self.win[3]:
+            w.disabled = lock
+
+    def perform_install(self, n: int):
+        try:
+            cpage = self.pageinfo_cpage.get()
+        except TclError:
+            return
+
+        self._lock_search_and_page(True)
+
+        target = self.cur_plugins_paged[cpage - 1][n]
+
+        self.win[1][n][1][2].disabled = True
+        p, tmp = (
+            molecules.perform_pip_install(
+                str(find_python(self.context.cwd_str)),
+                target["project_link"],
+                index=self.context.tmp_index,
+                new_win=True
+            ) if self.pluginvars_i[n].get() == "安装" else
+            molecules.perform_pip_command(
+                str(find_python(self.context.cwd_str)),
+                "uninstall", target["project_link"],
+                new_win=True
+            )
+        )
+
+        def _restore():
+            if p:
+                while p.poll() is None:
+                    pass
+                os.remove(tmp)
+                self.context.upddists()
+                self.updpluginvars()
+                self._lock_search_and_page(False)
+
+        Thread(target=_restore).start()
+
+    def perform_enable(self, n: int):
+        try:
+            cpage = self.pageinfo_cpage.get()
+        except TclError:
+            return
+        target = self.cur_plugins_paged[cpage - 1][n]["module_name"]
+        conf = get_toml_config(self.context.cwd_str)
+        if self.pluginvars_e[n].get() == "禁用":
+            conf.remove_plugin(target)
         else:
-            pageinfo_cpage.set(0)
+            conf.add_plugin(target)
 
-    def gotopage(page: int):
-        if pageinfo_mpage:
-            pageinfo_cpage.set(page % pageinfo_mpage + 1)
+        self.updpluginvars()
+
+    def do_search(self, *_):
+        sortkey = self.sortvar.get()
+        if sortkey not in self.sortmethods:
+            return
+
+        kwd = self.searchvar.get().lower()
+        if not kwd:
+            self.cur_plugins_paged = list_paginate(
+                self.sortmethods[sortkey](self.all_plugins), self.PAGESIZE
+            )
         else:
-            pageinfo_cpage.set(0)
+            kwds = kwd.split()
+            self.cur_plugins_paged = list_paginate(
+                self.sortmethods[sortkey](
+                    [x for x in self.all_plugins if all(k in self.plugin_context(x) for k in kwds)]
+                ), self.PAGESIZE
+            )
+        self.updpageinfo()
+        self.gotopage(0)
 
-    updpageinfo()
-    update_page()
+    def applysearch(self, *_):
+        self.search_timer.cancel()
+        self.search_timer = Timer(0.5, self.do_search)
+        self.search_timer.start()
 
 
 class AppHelp(Application):
