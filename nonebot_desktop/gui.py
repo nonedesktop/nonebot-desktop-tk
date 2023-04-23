@@ -342,20 +342,19 @@ class DriverManager(ApplicationWithContext):
             enabled = _enabled.split("+")
 
         for n, d in enumerate(meta.drivers):
+            self.drv_enabled_states[n].set("禁用" if d.module_name in enabled else "启用")
             if d.name.lower() in self.context.curdistnames:
                 self.drv_installed_states[n].set("已安装")
                 self.win[0][n][1][0].disabled = False
                 self.win[0][n][1][1].disabled = True
             elif d.name != "None":
                 self.drv_installed_states[n].set("安装")
-                self.win[0][n][1][0].disabled = True
+                self.win[0][n][1][0].disabled = self.drv_enabled_states[n].get() == "禁用"
                 self.win[0][n][1][1].disabled = False
             else:
                 self.drv_installed_states[n].set("内置")
                 self.win[0][n][1][0].disabled = False
                 self.win[0][n][1][1].disabled = True
-
-            self.drv_enabled_states[n].set("禁用" if d.module_name in enabled else "启用")
 
     def perform_enable(self, n: int) -> None:
         target = meta.drivers[n]
@@ -437,10 +436,12 @@ class AdapterManager(ApplicationWithContext):
         enabled = [a["module_name"] for a in _enabled]
 
         for n, d in enumerate(meta.adapters):
-            self.adp_installed_state[n].set("卸载" if d.project_link in self.context.curdistnames else "安装")
-            self.win[0][n][1][0].disabled = not d.project_link in self.context.curdistnames
-            self.adp_enabled_state[n].set("禁用" if d.module_name in enabled else "启用")
-            self.win[0][n][1][1].disabled = d.module_name in enabled
+            installed_ = d.project_link in self.context.curdistnames
+            enabled_ = d.module_name in enabled
+            self.adp_installed_state[n].set("卸载" if installed_ else "安装")
+            self.win[0][n][1][0].disabled = not (enabled_ or installed_)
+            self.adp_enabled_state[n].set("禁用" if enabled_ else "启用")
+            self.win[0][n][1][1].disabled = enabled_
 
     def perform_enable(self, n: int) -> None:
         target = meta.adapters[n]
@@ -774,10 +775,12 @@ class PluginStore(ApplicationWithContext):
         enabled = [a for a in _enabled]
 
         for n, d in enumerate(curpage):
-            self.pluginvars_i[n].set("卸载" if d["project_link"] in self.context.curdistnames else "安装")
-            self.pluginvars_e[n].set("禁用" if d["module_name"] in enabled else "启用")
-            self._pluginwidget(n)[1].disabled = not d["project_link"] in self.context.curdistnames
-            self._pluginwidget(n)[2].disabled = d["module_name"] in enabled
+            installed_ = d["project_link"] in self.context.curdistnames
+            enabled_ = d["module_name"] in enabled
+            self.pluginvars_i[n].set("卸载" if installed_ else "安装")
+            self.pluginvars_e[n].set("禁用" if enabled_ else "启用")
+            self._pluginwidget(n)[1].disabled = not (enabled_ or installed_)
+            self._pluginwidget(n)[2].disabled = enabled_
 
     def _getrealpageinfo(self) -> str:
         try:
@@ -939,6 +942,10 @@ class AppHelp(Application):
         "注意：[https://pypi.org/simple] 是官方的下载源，更新及时但下载速度慢。\n"
         "注意：无法保证使用时镜像源是否已同步最新的程序包，如果下载失败请更换不同的下载源。"
     )
+    BLOCK_NOTICE = (
+        "提示：通常情况下未安装的模块对应板块无法控制“[启用]”状态，已启用的模块对应板块无法控制“[安装]/[卸载]”状态。\n"
+        "提示：现在可以正常禁用已启用但未安装的模块了。"
+    )
     HOMEPAGE_T = (
         "欢迎使用 NoneBot Desktop 应用程序。\n\n"
         "本程序旨在减少使用 NoneBot2 时命令行的使用。\n\n"
@@ -991,9 +998,21 @@ class AppHelp(Application):
     DRVMGR_T = (
         "本页介绍了如何使用本程序管理项目使用的驱动器。\n\n"
         "注意：出于一些原因，本程序目前*没有*实现驱动器的卸载功能。\n\n"
+        "在主界面点击 [配置]菜单 -> [管理驱动器] 进入驱动器管理页面。\n\n"
+        "该页面上列出了可用的驱动器，驱动器名称位于每个板块的左上角，板块中间的内容是驱动器介绍。\n"
+        "板块下方有控制启用的按钮（左）和控制安装的按钮（右）。\n"
+        f"{BLOCK_NOTICE}\n\n"
+        f"{DRIVERS_NOTICE}\n\n"
+        f"{PYPI_INDEX_NOTICE}"
     )
     ADPMGR_T = (
         "本页介绍了如何使用本程序管理项目使用的适配器。\n\n"
+        "在主界面点击 [配置]菜单 -> [管理适配器] 进入适配器管理页面。\n\n"
+        "该页面上列出了可用的适配器，适配器名称位于每个板块的左上角，板块中间的内容是适配器介绍。\n"
+        "板块下方有控制启用的按钮（左）和控制安装的按钮（右）。\n"
+        f"{BLOCK_NOTICE}\n\n"
+        f"{ADAPTERS_NOTICE}\n\n"
+        f"{PYPI_INDEX_NOTICE}"
         ""
     )
 
