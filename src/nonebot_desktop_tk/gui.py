@@ -48,7 +48,7 @@ mono10 = ("Consolas", 10)
 
 
 class Context:
-    def __init__(self, main) -> None:
+    def __init__(self, main: "MainApp") -> None:
         self.main = main
         self.cwd = StringVar(value="[点击“项目”菜单新建或打开项目]")
         self.tmpindex = StringVar()
@@ -1015,6 +1015,33 @@ class AppHelp(Application):
         f"{PYPI_INDEX_NOTICE}"
         ""
     )
+    PACKENVMGR_T = (
+        "本页介绍了如何使用本程序管理项目使用的包环境（通常是本项目的虚拟环境）\n\n"
+        "在主界面点击 [配置]菜单 -> [管理环境] 进入环境管理页面。\n\n"
+        "页面左侧列表显示了当前环境安装的所有包，*双击*某个包即可查看这个包的信息或管理这个包。\n"
+        "界面下方有[更新]和[卸载]按钮，点击即可进行相应操作。\n\n"
+        f"{PYPI_INDEX_NOTICE}"
+    )
+    BUILTINPLG_T = (
+        "本页介绍了如何使用本程序管理项目使用的内置插件。\n\n"
+        "在主界面点击 [插件]菜单 -> [管理内置插件] 进入内置插件管理页面。\n\n"
+        "页面列出了所有的内置插件，每个内置插件可以分别控制[启用]与[禁用]。"
+    )
+    PLGSTORE_T = (
+        "本页介绍了如何使用本程序的插件商店。\n\n"
+        "在主界面点击 [插件]菜单 -> [插件商店] 进入插件商店页面。\n\n"
+        "页面上方有[搜索]栏和[排序]选项控制显示的内容。"
+        "可以在[搜索框]输入关键词（以空格分割）筛选想要的插件，"
+        "也可以指定插件的显示顺序。\n"
+        "提示：搜索内容不区分大小写。\n\n"
+        "页面中间展示了符合搜索条件的插件，一个插件使用一个板块。\n"
+        "板块左上角显示了插件的名称和作者，如果标为绿色则此插件为官方插件。\n"
+        "板块内部有插件的简介和标签（如果有）。\n"
+        "板块右侧有[主页]、[启用/禁用]和[安装/卸载]三个按钮。主页按钮用于前往项目主页，其余略（\n"
+        f"{BLOCK_NOTICE}\n\n"
+        "页面下方提供了几个翻页跳页的功能。\n\n"
+        f"{PYPI_INDEX_NOTICE}"
+    )
 
     def setup(self):
         self.win.title = "NoneBot Desktop - 使用手册"
@@ -1025,13 +1052,16 @@ class AppHelp(Application):
             ("编辑配置文件", self.EDITENV_T),
             ("管理驱动器", self.DRVMGR_T),
             ("管理适配器", self.ADPMGR_T),
+            ("管理环境", self.PACKENVMGR_T),
+            ("管理内置插件", self.BUILTINPLG_T),
+            ("插件商店", self.PLGSTORE_T),
         )
 
         self.win /= (
             W(ttk.Notebook) * Packer(anchor="nw", expand=True, fill="both") / (
                 (
-                    W(tk.Label, text=content, justify="left", font=font10, wraplength=600)
-                    * NotebookAdder(text=name, padding=2)
+                    W(tk.Label, text=content, justify="left", font=font10, wraplength=620)
+                    * NotebookAdder(text=name, padding=2, sticky="nw")
                 ) for name, content in name_content
             ),
         )
@@ -1040,8 +1070,9 @@ class AppHelp(Application):
 class AppAbout(Application):
     url = "https://github.com/nonedesktop/nonebot-desktop-tk"
     text = (
-        "NoneBot Desktop (Tkinter) 1.0.0b1\n"
-        "(C) 2023 NCBM (Nhanchou Baimin, 南舟白明, worldmozara)\n"
+        "NoneBot Desktop (Tkinter) 1.0.0\n"
+        "(C) 2023 NoneDesktop\n"
+        "开发人员：NCBM (Nhanchou Baimin, 南舟白明, worldmozara)\n"
         "该项目使用 MIT 协议开源。\n"
         f"项目主页: {url}"
     )
