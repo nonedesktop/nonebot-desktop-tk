@@ -554,7 +554,9 @@ class EnvironmentManager(ApplicationWithContext):
         li.config(yscrollcommand=sl.set)
         sl.config(command=li.yview)
 
-        @self.win[0][0][0].on(str(LMB - X2))
+        lbx = self.win[0][0][0]  # for compatibility with py38
+
+        @lbx.on(str(LMB - X2))
         def showinfo(event: Event):
             self.curpkg = event.widget.get(event.widget.curselection())
             self.info_updator()
