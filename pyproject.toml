@@ -1,12 +1,12 @@
 [project]
 name = "nonebot-desktop-tk"
-version = "1.0.3"
+version = "1.0.4"
 description = "NoneBot2 GUI manager written with tkinter."
 authors = [
     {name = "HivertMoZara", email = "worldmozara@163.com"},
 ]
 license = {text = "MIT"}
-dependencies = ["tkreform>=0.3.5", "nonebot-desktop-wing>=0.2.5"]
+dependencies = ["tkreform>=0.3.6", "nonebot-desktop-wing>=0.2.5"]
 requires-python = ">=3.8"
 readme = "README.md"
 
