@@ -194,7 +194,7 @@ class MainApp(Application):
             except Exception as e:
                 messagebox.showerror("错误", f"{e}", master=self.win.base)
             finally:
-                os.remove(tmp)
+                # os.remove(tmp)
                 self.win[1][0][1].disabled = False
                 self.win[1][1].disabled = False
 
@@ -392,7 +392,7 @@ class DriverManager(ApplicationWithContext):
             except Exception as e:
                 messagebox.showerror("错误", f"{e}", master=self.win.base)
             finally:
-                os.remove(tmp)
+                # os.remove(tmp)
                 self.context.upddists()
                 self.driver_st_updator()
 
@@ -479,7 +479,7 @@ class AdapterManager(ApplicationWithContext):
             except Exception as e:
                 messagebox.showerror("错误", f"{e}", master=self.win.base)
             finally:
-                os.remove(tmp)
+                # os.remove(tmp)
                 self.context.upddists()
                 self.adapter_st_updator()
 
@@ -586,7 +586,7 @@ class EnvironmentManager(ApplicationWithContext):
         except Exception as e:
             messagebox.showerror("错误", f"{e}", master=self.win.base)
         finally:
-            os.remove(tmpfile)
+            # os.remove(tmpfile)
             self.context.upddists()
             self.lock_when_perform(False)
             self.info_updator()
@@ -879,7 +879,7 @@ class PluginStore(ApplicationWithContext):
             if p:
                 while p.poll() is None:
                     pass
-                os.remove(tmp)
+                # os.remove(tmp)
                 self.context.upddists()
                 self.updpluginvars()
                 self._lock_search_and_page(False)
