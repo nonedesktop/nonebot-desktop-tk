@@ -675,13 +675,13 @@ class DotenvEditor(ApplicationWithContext):
         k, v = StringVar(value="参数名"), StringVar(value="值")
         self.curopts.append((k, v))
         _row = self.win[1].add_widget(tk.Frame)
-        _row.grid(column=0, sticky="w")
+        _row.pack(fill="x", expand=True)
         _key = _row.add_widget(tk.Entry, textvariable=k, font=mono10)
         _lbl = _row.add_widget(tk.Label, text=" = ", font=mono10)
-        _val = _row.add_widget(tk.Entry, textvariable=v, font=mono10, width=40)
+        _val = _row.add_widget(tk.Entry, textvariable=v, font=mono10)
         _key.pack(side="left")
         _lbl.pack(side="left")
-        _val.pack(side="left")
+        _val.pack(fill="x", expand=True, side="left")
 
     def save_env(self):
         try:
