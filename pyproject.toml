@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-desktop-tk"
-version = "1.0.5"
+version = "1.0.6"
 description = "NoneBot2 GUI manager written with tkinter."
 authors = [
     {name = "HivertMoZara", email = "worldmozara@163.com"},
