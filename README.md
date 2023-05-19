@@ -2,26 +2,32 @@
 
 使用 Tkinter 编写的图形化 NoneBot2 项目管理器。
 
-## 常规安装（未完成）
+## 常规安装
+
+从 [Releases](https://github.com/nonedesktop/nonebot-desktop-tk/releases) 中下载最新版本的 exe 安装包进行安装，完成后可以通过桌面快捷方式启动。
+
+> 提示：Win7 用户请选择 `py38` 版本，更新的系统可以选择 `py310` 版本。
 
 ## 从命令行安装与启动（不推荐）
 
 > 注意：
 >
 > - Windows 用户请确保
+>
 >   - 你使用的 Python 版本为 3.8 或更高；
 >
 >     > 如果安装了多个版本的 Python，可以通过 `py -3.x`(x >= 8) 在命令行使用指定版本的 Python。
->
+>     >
 >   - 安装 Python 时也安装了 Tkinter 相关组件。
 >
 >     > Python 官网安装包默认安装，自定义安装需要注意。
->
+>     >
 > - Linux 用户请确保
+>
 >   - 你使用的 Python 版本为 3.8 或更高；
 >
 >     > 如果安装了多个版本的 Python，可以通过 `python3.x`(x >= 8) 在命令行使用指定版本的 Python。
->
+>     >
 >   - 已经通过包管理器等安装了 `tcl` 和 `tk` 这两个包。
 >
 > 如果要指定 Python 版本，请将下面的 `python` 替换成指定了版本的 Python 程序，
